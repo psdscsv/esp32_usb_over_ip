@@ -298,9 +298,17 @@ int thread_main()
 
 extern "C" void app_main(void)
 {
+    // 初始化内存监控
+    ESP_LOGI(TAG, "Free heap: %d", esp_get_free_heap_size());
+    ESP_LOGI(TAG, "Minimum free heap: %d", esp_get_minimum_free_heap_size());
+
     std::thread main_thread([&]()
                             {
         ESP_LOGI(TAG, "启动主线程main函数");
-        thread_main(); });
+        ESP_LOGI(TAG, "线程启动前Free heap: %d", esp_get_free_heap_size());
+        thread_main(); 
+        ESP_LOGI(TAG, "线程结束后Free heap: %d", esp_get_free_heap_size()); });
     main_thread.join();
+
+    ESP_LOGI(TAG, "程序结束，Free heap: %d", esp_get_free_heap_size());
 }
