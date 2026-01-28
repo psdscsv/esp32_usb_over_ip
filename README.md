@@ -45,17 +45,14 @@
 - **从原项目 `usbipdcpp_esp32` 分叉并进行增强**
 - 修复了因数据传输包大于设备缓冲区导致的卡死
 
-*[查看完整更新历史](CHANGELOG.md)*
+*[查看完整更新历史](changelog.md)*
 
 ---
 
 ## 📝 许可证与致谢
 
 ### 许可证
-本项目基于 **Apache License Version 2.0** 开源。
-*   **原始代码版权**归属于原项目作者 [yunsmall](https://github.com/yunsmall)。
-*   所有**修改和新增的代码**同样遵循 Apache 2.0 许可证。
-*   在分发或使用本作品时，**必须保留原作者的版权、专利、商标及 attribution 声明**。具体细节请查阅完整的 [LICENSE](LICENSE) 文件。
+*   本项目基于 **Apache License Version 2.0** 开源。
 
 ### 致谢
 *   衷心感谢原项目作者 [yunsmall](https://github.com/yunsmall) 及的工作。

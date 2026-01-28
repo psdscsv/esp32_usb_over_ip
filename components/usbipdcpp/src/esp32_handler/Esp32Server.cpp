@@ -219,7 +219,7 @@ void usbipdcpp::Esp32Server::bind_host_device(usb_device_handle_t dev)
             .busid = esp32_get_device_busid(dev_info.dev_addr),
             .bus_num = 1,
             .dev_num = dev_info.dev_addr,
-            .speed = (std::uint32_t)esp32_speed_to_usb_speed(USB_SPEED_HIGH),
+            .speed = (std::uint32_t)esp32_speed_to_usb_speed(dev_info.speed),
             .vendor_id = device_descriptor->idVendor,
             .product_id = device_descriptor->idProduct,
             .device_bcd = device_descriptor->bcdDevice,
