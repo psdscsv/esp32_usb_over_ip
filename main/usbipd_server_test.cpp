@@ -29,8 +29,8 @@ std::atomic_bool wifi_thread_should_stop = false;
 std::binary_semaphore wifi_reconnect_semaphore{0};
 std::thread wifi_connect_thread;
 
-auto wifi_ssid = "TAN3";
-auto wifi_passwd = "qwertyuiop";
+auto wifi_ssid = "xxx";
+auto wifi_passwd = "xxxxxxxx";
 
 constexpr std::uint16_t listening_port = 3240;
 
