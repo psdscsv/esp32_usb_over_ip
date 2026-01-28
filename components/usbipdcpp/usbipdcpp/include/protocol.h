@@ -4,6 +4,7 @@
 #include <variant>
 #include <array>
 #include <vector>
+#include <memory>
 #include <system_error>
 
 #include <asio/awaitable.hpp>
@@ -11,28 +12,28 @@
 #include "network.h"
 #include "device.h"
 
-
-namespace usbipdcpp {
+namespace usbipdcpp
+{
     constexpr std::uint16_t USBIP_VERSION = 0x0111;
-
 
     constexpr std::uint16_t OP_REQ_DEVLIST = 0x8005;
     constexpr std::uint16_t OP_REP_DEVLIST = 0x0005;
     constexpr std::uint16_t OP_REQ_IMPORT = 0x8003;
     constexpr std::uint16_t OP_REP_IMPORT = 0x0003;
 
-
     constexpr std::uint32_t USBIP_CMD_SUBMIT = 0x0001;
     constexpr std::uint32_t USBIP_CMD_UNLINK = 0x0002;
     constexpr std::uint32_t USBIP_RET_SUBMIT = 0x0003;
     constexpr std::uint32_t USBIP_RET_UNLINK = 0x0004;
 
-    enum UsbIpDirection {
+    enum UsbIpDirection
+    {
         Out = 0,
         In = 1,
     };
 
-    enum class ErrorType {
+    enum class ErrorType
+    {
         OK = 0,
         UNKNOWN_VERSION,
         UNKNOWN_CMD,
@@ -46,23 +47,25 @@ namespace usbipdcpp {
         TRANSFER_ERROR,
     };
 
-    //tools/usbip_common.h
-    enum class OperationStatuType {
-        //Request Completed Successfully
+    // tools/usbip_common.h
+    enum class OperationStatuType
+    {
+        // Request Completed Successfully
         OK = 0,
-        //Request Failed
+        // Request Failed
         NA,
-        //Device busy (exported)
+        // Device busy (exported)
         DevBusy,
-        //Device in error state
+        // Device in error state
         DevError,
-        //Device not found
+        // Device not found
         NoDev,
-        //Unexpected response
+        // Unexpected response
         Error
     };
 
-    enum class UrbStatusType {
+    enum class UrbStatusType
+    {
         StatusOK = -0,
         StatusECONNRESET = -104,
         StatusEPIPE = -32,
@@ -73,7 +76,8 @@ namespace usbipdcpp {
         StatusEEOVERFLOW = -75
     };
 
-    class TransferErrorCategory : public std::error_category {
+    class TransferErrorCategory : public std::error_category
+    {
     public:
         [[nodiscard]] const char *name() const noexcept override;
         [[nodiscard]] std::string message(int _Errval) const override;
@@ -82,12 +86,12 @@ namespace usbipdcpp {
     const TransferErrorCategory g_error_category;
     std::error_code make_error_code(ErrorType e);
 
-
-    struct UsbIpHeaderBasic {
+    struct UsbIpHeaderBasic
+    {
         /**
          * 这个字段并不需要从socket里面读，由子命令设置。
          * 根据先读的字段判断应该创建哪个包
-        */
+         */
         std::uint32_t command;
         std::uint32_t seqnum;
         std::uint32_t devid;
@@ -95,44 +99,43 @@ namespace usbipdcpp {
         std::uint32_t ep;
 
         [[nodiscard]] array_data_type<calculate_total_size_with_array<
-            decltype(command), decltype(seqnum), decltype(devid), decltype(direction), decltype(ep)
-        >()>
+            decltype(command), decltype(seqnum), decltype(devid), decltype(direction), decltype(ep)>()>
         to_bytes() const;
         [[nodiscard]] asio::awaitable<void> from_socket_co(asio::ip::tcp::socket &sock);
         void from_socket(asio::ip::tcp::socket &sock);
 
         bool operator==(const UsbIpHeaderBasic &other) const = default;
 
-        void set_as_server() {
+        void set_as_server()
+        {
             devid = 0;
             direction = 0;
             ep = 0;
         }
 
-        static UsbIpHeaderBasic get_server_header(std::uint32_t command, std::uint32_t seqnum) {
+        static UsbIpHeaderBasic get_server_header(std::uint32_t command, std::uint32_t seqnum)
+        {
             return UsbIpHeaderBasic{
-                    .command = command,
-                    .seqnum = seqnum,
-                    .devid = 0,
-                    .direction = 0,
-                    .ep = 0
-            };
+                .command = command,
+                .seqnum = seqnum,
+                .devid = 0,
+                .direction = 0,
+                .ep = 0};
         }
-
     };
 
     static_assert(Serializable<UsbIpHeaderBasic>);
 
-
-    struct UsbIpIsoPacketDescriptor {
+    struct UsbIpIsoPacketDescriptor
+    {
         std::uint32_t offset;
         std::uint32_t length;
         std::uint32_t actual_length;
         std::uint32_t status;
 
         [[nodiscard]] array_data_type<calculate_total_size_with_array<
-            decltype(offset), decltype(length), decltype(actual_length), decltype(status)
-        >()> to_bytes() const;
+            decltype(offset), decltype(length), decltype(actual_length), decltype(status)>()>
+        to_bytes() const;
         [[nodiscard]] asio::awaitable<void> from_socket_co(asio::ip::tcp::socket &sock);
         void from_socket(asio::ip::tcp::socket &sock);
 
@@ -141,13 +144,15 @@ namespace usbipdcpp {
 
     static_assert(Serializable<UsbIpIsoPacketDescriptor>);
 
-    namespace UsbIpCommand {
-        struct OpReqDevlist {
+    namespace UsbIpCommand
+    {
+        struct OpReqDevlist
+        {
             std::uint32_t status;
 
             [[nodiscard]] array_data_type<calculate_total_size_with_array<
-                decltype(USBIP_VERSION), decltype(OP_REQ_DEVLIST), decltype(status)
-            >()> to_bytes() const;
+                decltype(USBIP_VERSION), decltype(OP_REQ_DEVLIST), decltype(status)>()>
+            to_bytes() const;
             [[nodiscard]] asio::awaitable<void> from_socket_co(asio::ip::tcp::socket &sock);
             void from_socket(asio::ip::tcp::socket &sock);
             bool operator==(const OpReqDevlist &) const = default;
@@ -155,13 +160,14 @@ namespace usbipdcpp {
 
         static_assert(Serializable<OpReqDevlist>);
 
-        struct OpReqImport {
+        struct OpReqImport
+        {
             std::uint32_t status;
             array_data_type<32> busid;
 
             [[nodiscard]] array_data_type<calculate_total_size_with_array<
-                decltype(USBIP_VERSION), decltype(OP_REQ_DEVLIST), decltype(status), decltype(busid)
-            >()> to_bytes() const;
+                decltype(USBIP_VERSION), decltype(OP_REQ_DEVLIST), decltype(status), decltype(busid)>()>
+            to_bytes() const;
             [[nodiscard]] asio::awaitable<void> to_socket_co(asio::ip::tcp::socket &sock, error_code &ec) const;
             [[nodiscard]] asio::awaitable<void> from_socket_co(asio::ip::tcp::socket &sock);
             void to_socket(asio::ip::tcp::socket &sock, error_code &ec) const;
@@ -172,7 +178,8 @@ namespace usbipdcpp {
 
         static_assert(SerializableFromSocket<OpReqImport>);
 
-        struct UsbIpCmdSubmit {
+        struct UsbIpCmdSubmit
+        {
             UsbIpHeaderBasic header;
             std::uint32_t transfer_flags;
             std::uint32_t transfer_buffer_length;
@@ -186,27 +193,26 @@ namespace usbipdcpp {
 
             [[nodiscard]] std::vector<std::uint8_t> to_bytes() const;
             [[nodiscard]] asio::awaitable<void> to_socket_co(asio::ip::tcp::socket &sock, error_code &ec) const;
-            //这个函数只读取部分数值，后面的数据部分不读取
+            // 这个函数只读取部分数值，后面的数据部分不读取
             [[nodiscard]] asio::awaitable<void> from_socket_co(asio::ip::tcp::socket &sock);
             void to_socket(asio::ip::tcp::socket &sock, error_code &ec) const;
-            //这个函数只读取部分数值，后面的数据部分不读取
+            // 这个函数只读取部分数值，后面的数据部分不读取
             void from_socket(asio::ip::tcp::socket &sock);
-
 
             bool operator==(const UsbIpCmdSubmit &other) const;
         };
 
         static_assert(SerializableFromSocket<UsbIpCmdSubmit>);
 
-        struct UsbIpCmdUnlink {
+        struct UsbIpCmdUnlink
+        {
             UsbIpHeaderBasic header;
             std::uint32_t unlink_seqnum;
 
             [[nodiscard]] array_data_type<
                 calculate_total_size_with_array<
-                    decltype(UsbIpHeaderBasic{}.to_bytes()), decltype(unlink_seqnum)
-                >() + 24
-            > to_bytes() const;
+                    decltype(UsbIpHeaderBasic{}.to_bytes()), decltype(unlink_seqnum)>() +
+                24> to_bytes() const;
             [[nodiscard]] asio::awaitable<void> to_socket_co(asio::ip::tcp::socket &sock, error_code &ec) const;
             [[nodiscard]] asio::awaitable<void> from_socket_co(asio::ip::tcp::socket &sock);
             void to_socket(asio::ip::tcp::socket &sock, error_code &ec) const;
@@ -220,7 +226,6 @@ namespace usbipdcpp {
         using OpCmdVariant = std::variant<OpReqDevlist, OpReqImport>;
         using CmdVariant = std::variant<UsbIpCmdSubmit, UsbIpCmdUnlink>;
 
-
         /**
          * @brief 该函数只有ec有值则返回值为空，无ec则一定有值，无需二次判断
          * @param sock
@@ -228,7 +233,7 @@ namespace usbipdcpp {
          * @return 获取到的命令
          */
         asio::awaitable<usbipdcpp::UsbIpCommand::OpCmdVariant> get_op_from_socket(
-                asio::ip::tcp::socket &sock, usbipdcpp::error_code &ec);
+            asio::ip::tcp::socket &sock, usbipdcpp::error_code &ec);
         /**
          * @brief 该函数只有ec有值则返回值为空，无ec则一定有值，无需二次判断
          * @param sock
@@ -236,13 +241,15 @@ namespace usbipdcpp {
          * @return 获取到的命令
          */
         asio::awaitable<usbipdcpp::UsbIpCommand::CmdVariant> get_cmd_from_socket(
-                asio::ip::tcp::socket &sock, usbipdcpp::error_code &ec);
+            asio::ip::tcp::socket &sock, usbipdcpp::error_code &ec);
 
         std::vector<std::uint8_t> to_bytes(const AllCmdVariant &cmd);
     }
 
-    namespace UsbIpResponse {
-        struct OpRepDevlist {
+    namespace UsbIpResponse
+    {
+        struct OpRepDevlist
+        {
             std::uint32_t status;
             std::uint32_t device_count;
             std::vector<UsbDevice> devices;
@@ -260,7 +267,8 @@ namespace usbipdcpp {
 
         static_assert(SerializableFromSocket<OpRepDevlist>);
 
-        struct OpRepImport {
+        struct OpRepImport
+        {
             std::uint32_t status;
             std::shared_ptr<UsbDevice> device;
 
@@ -270,7 +278,8 @@ namespace usbipdcpp {
             void to_socket(asio::ip::tcp::socket &sock, error_code &ec) const;
             void from_socket(asio::ip::tcp::socket &sock);
 
-            bool operator==(const OpRepImport &other) const {
+            bool operator==(const OpRepImport &other) const
+            {
                 return status == other.status &&
                        device && other.device &&
                        *device == *(other.device);
@@ -287,14 +296,15 @@ namespace usbipdcpp {
 
         static_assert(SerializableFromSocket<OpRepImport>);
 
-        struct UsbIpRetSubmit {
+        struct UsbIpRetSubmit
+        {
             UsbIpHeaderBasic header;
             std::uint32_t status;
             std::uint32_t actual_length;
             std::uint32_t start_frame;
             std::uint32_t number_of_packets;
             std::uint32_t error_count;
-            data_type transfer_buffer;
+            std::shared_ptr<data_type> transfer_buffer;
             std::vector<UsbIpIsoPacketDescriptor> iso_packet_descriptor;
 
             [[nodiscard]] data_type to_bytes() const;
@@ -307,14 +317,21 @@ namespace usbipdcpp {
 
             static UsbIpRetSubmit usbip_ret_submit_fail_with_status(std::uint32_t seqnum, std::uint32_t status);
             static UsbIpRetSubmit create_ret_submit(
-                    std::uint32_t seqnum,
-                    std::uint32_t status,
-                    std::uint32_t start_frame,
-                    std::uint32_t number_of_packets,
-                    std::vector<std::uint8_t> &&transfer_buffer,
-                    const std::vector<UsbIpIsoPacketDescriptor> &
-                    iso_packet_descriptor
-                    );
+                std::uint32_t seqnum,
+                std::uint32_t status,
+                std::uint32_t start_frame,
+                std::uint32_t number_of_packets,
+                std::vector<std::uint8_t> &&transfer_buffer,
+                const std::vector<UsbIpIsoPacketDescriptor> &
+                    iso_packet_descriptor);
+            static UsbIpRetSubmit create_ret_submit(
+                std::uint32_t seqnum,
+                std::uint32_t status,
+                std::uint32_t start_frame,
+                std::uint32_t number_of_packets,
+                std::shared_ptr<data_type> transfer_buffer,
+                const std::vector<UsbIpIsoPacketDescriptor> &
+                    iso_packet_descriptor);
             static UsbIpRetSubmit create_ret_submit_ok_without_data(std::uint32_t seqnum);
             static UsbIpRetSubmit create_ret_submit_with_status_and_no_data(std::uint32_t seqnum, std::uint32_t status);
             static UsbIpRetSubmit create_ret_submit_with_status_and_no_iso(std::uint32_t seqnum, std::uint32_t status,
@@ -328,15 +345,15 @@ namespace usbipdcpp {
 
         static_assert(SerializableFromSocket<UsbIpRetSubmit>);
 
-        struct UsbIpRetUnlink {
+        struct UsbIpRetUnlink
+        {
             UsbIpHeaderBasic header;
             std::uint32_t status;
 
             [[nodiscard]] array_data_type<
                 calculate_total_size_with_array<
-                    decltype(UsbIpHeaderBasic{}.to_bytes()), decltype(status)
-                >() + 24
-            > to_bytes() const;
+                    decltype(UsbIpHeaderBasic{}.to_bytes()), decltype(status)>() +
+                24> to_bytes() const;
             [[nodiscard]] asio::awaitable<void> to_socket_co(asio::ip::tcp::socket &sock, error_code &ec) const;
             [[nodiscard]] asio::awaitable<void> from_socket_co(asio::ip::tcp::socket &sock);
             void to_socket(asio::ip::tcp::socket &sock, error_code &ec) const;
@@ -354,6 +371,5 @@ namespace usbipdcpp {
         using RetVariant = std::variant<UsbIpRetSubmit, UsbIpRetUnlink>;
         using AllRepVariant = std::variant<OpRepDevlist, OpRepImport, UsbIpRetSubmit, UsbIpRetUnlink>;
     }
-
 
 }

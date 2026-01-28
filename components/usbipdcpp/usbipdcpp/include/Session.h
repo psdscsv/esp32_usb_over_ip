@@ -14,14 +14,16 @@
 #include "protocol.h"
 #include "type.h"
 
-namespace usbipdcpp {
+namespace usbipdcpp
+{
     class Server;
 
     /**
      * @brief 自行处理生命周期，一个连接创建一个Session，创建完服务器就对Session脱离管控了。
      * 请确保Session存活的时候Server未被析构，不然是未定义行为
      */
-    class Session : public std::enable_shared_from_this<Session> {
+    class Session : public std::enable_shared_from_this<Session>
+    {
         friend class Server;
 
     public:
@@ -63,7 +65,6 @@ namespace usbipdcpp {
          */
         void submit_ret_submit(UsbIpResponse::UsbIpRetSubmit &&submit);
 
-
         ~Session();
 
     private:
@@ -82,7 +83,8 @@ namespace usbipdcpp {
 
         using transfer_channel_type = asio::experimental::channel<void(asio::error_code, UsbIpResponse::RetVariant)>;
 
-        static constexpr std::size_t transfer_channel_size = 100;
+        // 增大传输通道缓冲，避免大量并发ret_submit/ret_unlink导致channel被填满
+        static constexpr std::size_t transfer_channel_size = 2048;
         std::unique_ptr<transfer_channel_type> transfer_channel = nullptr;
         // using transfer_channel = asio::experimental::channel<void(asio::error_code)>;
         /**
@@ -97,17 +99,17 @@ namespace usbipdcpp {
 
         std::atomic_bool should_immediately_stop = false;
 
-        //是否在传输ret_submit的阶段
+        // 是否在传输ret_submit的阶段
         std::atomic_bool cmd_transferring = false;
 
-        //传输过程中不允许为空，传输过程中禁止任何写入。不允许在非网络线程读，除非加锁
+        // 传输过程中不允许为空，传输过程中禁止任何写入。不允许在非网络线程读，除非加锁
         std::optional<std::string> current_import_device_id = std::nullopt;
-        //传输过程中不允许为空，传输过程中禁止任何写入。不允许在非网络线程读，除非加锁
+        // 传输过程中不允许为空，传输过程中禁止任何写入。不允许在非网络线程读，除非加锁
         std::shared_ptr<UsbDevice> current_import_device = nullptr;
-        //上面两个变量的值的锁
+        // 上面两个变量的值的锁
         std::shared_mutex current_import_device_data_mutex;
 
-        //从原本的ret_submit的seqnum映射到ret_unlink的seqnum
+        // 从原本的ret_submit的seqnum映射到ret_unlink的seqnum
         std::unordered_map<std::uint32_t, std::uint32_t> unlink_map;
         std::shared_mutex unlink_map_mutex;
 
@@ -115,8 +117,7 @@ namespace usbipdcpp {
         asio::io_context session_io_context{};
         asio::ip::tcp::socket socket;
 
-
-        //这个线程结束后自动析构this
+        // 这个线程结束后自动析构this
         std::thread run_thread;
     };
 }

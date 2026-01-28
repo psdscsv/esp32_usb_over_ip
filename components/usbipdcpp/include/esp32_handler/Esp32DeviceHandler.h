@@ -83,6 +83,7 @@ namespace usbipdcpp
             usb_transfer_type_t transfer_type;
             bool is_out;
             std::uint32_t original_transfer_buffer_length; // 添加的字段
+            bool counted_in_concurrent = false;
         };
 
         static void transfer_callback(usb_transfer_t *trx);
@@ -99,5 +100,15 @@ namespace usbipdcpp
         std::atomic_bool all_transfer_should_stop = false;
 
         std::atomic_bool has_device = true;
+
+    private:
+        // 内存监控
+        void check_and_clean_memory();
+        std::chrono::steady_clock::time_point last_memory_check;
+
+        // 最大并发传输数限制。ESP32 内存有限，过高会导致分配大缓冲区失败（std::bad_alloc）。
+        // 将该值保守设置为较小的数以降低同时分配大缓冲区的风险。
+        static constexpr size_t MAX_CONCURRENT_TRANSFERS = 500;
+        std::atomic<size_t> concurrent_transfer_count{0};
     };
 }

@@ -10,55 +10,79 @@
 #include "protocol.h"
 #include "utils.h"
 
-usbipdcpp::Session::Session(Server &server):
-    server(server),
-    socket(session_io_context) {
+usbipdcpp::Session::Session(Server &server) : server(server),
+                                              socket(session_io_context)
+{
 }
 
-std::tuple<bool, std::uint32_t> usbipdcpp::Session::get_unlink_seqnum(std::uint32_t seqnum) {
+std::tuple<bool, std::uint32_t> usbipdcpp::Session::get_unlink_seqnum(std::uint32_t seqnum)
+{
     std::shared_lock lock(unlink_map_mutex);
-    if (unlink_map.contains(seqnum)) {
+    if (unlink_map.contains(seqnum))
+    {
         return {true, unlink_map[seqnum]};
     }
     return {false, 0};
 }
 
-void usbipdcpp::Session::remove_seqnum_unlink(std::uint32_t seqnum) {
+void usbipdcpp::Session::remove_seqnum_unlink(std::uint32_t seqnum)
+{
     std::lock_guard lock(unlink_map_mutex);
     unlink_map.erase(seqnum);
 }
 
 void usbipdcpp::Session::submit_ret_unlink_and_then_remove_seqnum_unlink(UsbIpResponse::UsbIpRetUnlink &&unlink,
-                                                                         std::uint32_t seqnum) {
+                                                                         std::uint32_t seqnum)
+{
     submit_ret_unlink(std::move(unlink));
     remove_seqnum_unlink(seqnum);
 }
 
-void usbipdcpp::Session::submit_ret_unlink(UsbIpResponse::UsbIpRetUnlink &&unlink) {
+void usbipdcpp::Session::submit_ret_unlink(UsbIpResponse::UsbIpRetUnlink &&unlink)
+{
     SPDLOG_DEBUG("收到提交的unlink包 {}", unlink.header.seqnum);
     error_code send_ec;
     transfer_channel->async_send(send_ec, UsbIpResponse::RetVariant{std::move(unlink)}, asio::detached);
+    if (send_ec)
+    {
+        SPDLOG_ERROR("transfer_channel async_send unlink seq={} error: {}", unlink.header.seqnum, send_ec.message());
+    }
+    else
+    {
+        SPDLOG_DEBUG("transfer_channel async_send unlink seq={} queued", unlink.header.seqnum);
+    }
 }
 
-void usbipdcpp::Session::submit_ret_submit(UsbIpResponse::UsbIpRetSubmit &&submit) {
+void usbipdcpp::Session::submit_ret_submit(UsbIpResponse::UsbIpRetSubmit &&submit)
+{
     SPDLOG_DEBUG("收到提交的submit包{}", submit.header.seqnum);
     error_code send_ec;
     transfer_channel->async_send(send_ec, UsbIpResponse::RetVariant{std::move(submit)}, asio::detached);
+    if (send_ec)
+    {
+        SPDLOG_ERROR("transfer_channel async_send submit seq={} error: {}", submit.header.seqnum, send_ec.message());
+    }
+    else
+    {
+        SPDLOG_TRACE("transfer_channel async_send submit seq={} queued", submit.header.seqnum);
+    }
 }
 
-usbipdcpp::Session::~Session() {
+usbipdcpp::Session::~Session()
+{
     SPDLOG_TRACE("Session析构");
 }
 
-void usbipdcpp::Session::run() {
+void usbipdcpp::Session::run()
+{
     auto self = shared_from_this();
-    asio::co_spawn(session_io_context, [this]() {
-        return parse_op();
-    }, if_has_value_than_rethrow);
+    asio::co_spawn(session_io_context, [this]()
+                   { return parse_op(); }, if_has_value_than_rethrow);
 
     SPDLOG_TRACE("创建Session线程");
-    //这个线程结束后自动析构this
-    run_thread = std::thread([self=std::move(self)]() {
+    // 这个线程结束后自动析构this
+    run_thread = std::thread([self = std::move(self)]()
+                             {
         self->session_io_context.run();
 
         //处理结束后自动往服务器中删除自身
@@ -83,26 +107,30 @@ void usbipdcpp::Session::run() {
         }
         self->server.on_session_exit();
         //把当前这个线程detach了，防止线程内部析构自己导致报错
-        self->run_thread.detach();
-    });
+        self->run_thread.detach(); });
 }
 
-asio::awaitable<void> usbipdcpp::Session::parse_op() {
+asio::awaitable<void> usbipdcpp::Session::parse_op()
+{
     usbipdcpp::error_code ec;
     SPDLOG_TRACE("尝试读取OP");
     auto op = co_await UsbIpCommand::get_op_from_socket(socket, ec);
-    if (ec) {
+    if (ec)
+    {
         SPDLOG_DEBUG("从socket中获取op时出错：{}", ec.message());
-        if (ec.value() == static_cast<int>(ErrorType::SOCKET_EOF)) {
+        if (ec.value() == static_cast<int>(ErrorType::SOCKET_EOF))
+        {
             SPDLOG_DEBUG("连接关闭");
         }
-        else if (ec.value() == static_cast<int>(ErrorType::SOCKET_ERR)) {
+        else if (ec.value() == static_cast<int>(ErrorType::SOCKET_ERR))
+        {
             SPDLOG_DEBUG("发生socket错误");
         }
 
         goto close_socket;
     }
-    co_await std::visit([&,this](auto &&cmd)-> asio::awaitable<void> {
+    co_await std::visit([&, this](auto &&cmd) -> asio::awaitable<void>
+                        {
         using T = std::remove_cvref_t<decltype(cmd)>;
         if constexpr (std::is_same_v<UsbIpCommand::OpReqDevlist, T>) {
             SPDLOG_TRACE("收到 OpReqDevlist 包");
@@ -177,28 +205,33 @@ asio::awaitable<void> usbipdcpp::Session::parse_op() {
         else {
             //确保处理了所有可能类型
             static_assert(!std::is_same_v<T, T>);
-        }
-    }, op);
+        } }, op);
 
-    if (this->transfer_channel) {
+    if (this->transfer_channel)
+    {
         this->transfer_channel->close();
     }
 
 close_socket:
     std::error_code ignore_ec;
-    SPDLOG_INFO("尝试关闭socket");
+    SPDLOG_INFO("尝试关闭socket，原因: {}", ec.message());
     socket.shutdown(asio::ip::tcp::socket::shutdown_both, ignore_ec);
     socket.close(ignore_ec);
 }
 
-void usbipdcpp::Session::immediately_stop() {
+void usbipdcpp::Session::immediately_stop()
+{
     should_immediately_stop = true;
 
+    SPDLOG_INFO("session immediately_stop called");
+
     asio::post(session_io_context,
-               [this]() {
-                   //关闭后才会析构，直接使用this安全
+               [this]()
+               {
+                   // 关闭后才会析构，直接使用this安全
                    this->socket.close();
-                   if (this->transfer_channel) {
+                   if (this->transfer_channel)
+                   {
                        this->transfer_channel->close();
                    }
                });
@@ -212,7 +245,8 @@ void usbipdcpp::Session::immediately_stop() {
     // }
 }
 
-asio::awaitable<void> usbipdcpp::Session::transfer_loop(usbipdcpp::error_code &transferring_ec) {
+asio::awaitable<void> usbipdcpp::Session::transfer_loop(usbipdcpp::error_code &transferring_ec)
+{
     current_import_device->on_new_connection(*this, transferring_ec);
     if (transferring_ec)
         co_return;
@@ -225,38 +259,47 @@ asio::awaitable<void> usbipdcpp::Session::transfer_loop(usbipdcpp::error_code &t
 
     co_await (receiver(receiver_ec) && sender(sender_ec));
 
-    if (sender_ec) {
+    if (sender_ec)
+    {
         SPDLOG_ERROR("An error occur during sending: {}", sender_ec.message());
         transferring_ec = sender_ec;
     }
-    //一般来说receiver_ec的ec重要一点，因此会覆盖掉
-    else if (receiver_ec) {
+    // 一般来说receiver_ec的ec重要一点，因此会覆盖掉
+    else if (receiver_ec)
+    {
         SPDLOG_ERROR("An error occur during receiving: {}", receiver_ec.message());
         transferring_ec = receiver_ec;
     }
     cmd_transferring = false;
 }
 
-asio::awaitable<void> usbipdcpp::Session::receiver(usbipdcpp::error_code &receiver_ec) {
+asio::awaitable<void> usbipdcpp::Session::receiver(usbipdcpp::error_code &receiver_ec)
+{
     spdlog::info("should_immediately_stop:{}", should_immediately_stop.load());
-    while (!should_immediately_stop) {
+    while (!should_immediately_stop)
+    {
         usbipdcpp::error_code ec;
 
         auto command = co_await UsbIpCommand::get_cmd_from_socket(socket, ec);
-        if (ec) {
+        if (ec)
+        {
             SPDLOG_DEBUG("从socket中获取命令时出错：{}", ec.message());
-            if (ec.value() == static_cast<int>(ErrorType::SOCKET_EOF)) {
+            if (ec.value() == static_cast<int>(ErrorType::SOCKET_EOF))
+            {
                 SPDLOG_DEBUG("连接关闭");
             }
-            else if (ec.value() == static_cast<int>(ErrorType::SOCKET_ERR)) {
+            else if (ec.value() == static_cast<int>(ErrorType::SOCKET_ERR))
+            {
                 SPDLOG_DEBUG("发生socket错误");
             }
             break;
         }
-        else {
+        else
+        {
             if (should_immediately_stop)
                 break;
-            co_await std::visit([&,this](auto &&cmd)-> asio::awaitable<void> {
+            co_await std::visit([&, this](auto &&cmd) -> asio::awaitable<void>
+                                {
                 using T = std::remove_cvref_t<decltype(cmd)>;
                 if constexpr (std::is_same_v<UsbIpCommand::UsbIpCmdSubmit, T>) {
                     UsbIpCommand::UsbIpCmdSubmit &cmd2 = cmd;
@@ -342,43 +385,57 @@ asio::awaitable<void> usbipdcpp::Session::receiver(usbipdcpp::error_code &receiv
                     //确保处理了所有可能类型
                     static_assert(!std::is_same_v<T, T>);
                 }
-                co_return;
-            }, command);
+                co_return; }, command);
         }
     }
-    //通知设备断连，告诉设备禁止再发消息
+    // 通知设备断连，告诉设备禁止再发消息
     current_import_device->on_disconnection(receiver_ec);
-    //然后再关闭发送的channel，防止先关闭了但设备因还未被通知到关闭而报错
+    // 然后再关闭发送的channel，防止先关闭了但设备因还未被通知到关闭而报错
     transfer_channel->close();
 
     /* 这里先标记为可用是可行的
      * 一是设备on_disconnection需要阻塞，把自身断连需要做的事全处理掉
      * 二是这个session马上就要析构了current_import_device的那两个变量不会重新被使用
      * 因此先标记为可用再清除这两个变量的状态
-    */
+     */
     server.try_moving_device_to_available(*current_import_device_id);
     current_import_device_id.reset();
     current_import_device.reset();
     SPDLOG_TRACE("将当前导入设备的busid设为空");
 }
 
-asio::awaitable<void> usbipdcpp::Session::sender(usbipdcpp::error_code &ec) {
-    while (!should_immediately_stop) {
-        //不停从channel中获取数据
+asio::awaitable<void> usbipdcpp::Session::sender(usbipdcpp::error_code &ec)
+{
+    while (!should_immediately_stop)
+    {
+        // 不停从channel中获取数据
         auto send_data = co_await transfer_channel->async_receive(asio::redirect_error(asio::use_awaitable, ec));
-        if (ec) {
+        if (ec)
+        {
+            SPDLOG_ERROR("transfer_channel async_receive error: {}", ec.message());
             break;
         }
         SPDLOG_TRACE("channel收到消息");
         error_code sending_ec;
-        co_await std::visit([&](auto &&cmd)-> asio::awaitable<void> {
+        co_await std::visit([&](auto &&cmd) -> asio::awaitable<void>
+                            {
             using T = std::remove_cvref_t<decltype(cmd)>;
             if constexpr (std::is_same_v<UsbIpResponse::UsbIpRetSubmit, T>) {
                 co_await cmd.to_socket_co(socket, sending_ec);
+                if (sending_ec) {
+                    SPDLOG_ERROR("写入 socket 时出错 submit seq={} : {}", cmd.header.seqnum, sending_ec.message());
+                } else {
+                    SPDLOG_DEBUG("成功写入 socket submit seq={}", cmd.header.seqnum);
+                }
                 // end_processing_urb();
             }
             else if constexpr (std::is_same_v<UsbIpResponse::UsbIpRetUnlink, T>) {
                 co_await cmd.to_socket_co(socket, sending_ec);
+                if (sending_ec) {
+                    SPDLOG_ERROR("写入 socket 时出错 unlink seq={} : {}", cmd.header.seqnum, sending_ec.message());
+                } else {
+                    SPDLOG_DEBUG("成功写入 socket unlink seq={}", cmd.header.seqnum);
+                }
                 // end_processing_urb();
             }
             else if constexpr (std::is_same_v<std::monostate, T>) {
@@ -388,16 +445,22 @@ asio::awaitable<void> usbipdcpp::Session::sender(usbipdcpp::error_code &ec) {
             else {
                 //确保处理了所有可能类型
                 static_assert(!std::is_same_v<T, T>);
-            }
-        }, send_data);
-        if (sending_ec) {
-            // 直接不处理发送过程中的错误
-            // ec = sending_ec;
+            } }, send_data);
+        if (sending_ec)
+        {
+            SPDLOG_ERROR("发送到 socket 时发生错误: {}", sending_ec.message());
+            // 将 sending_ec 传回给 caller
+            ec = sending_ec;
             break;
         }
     }
-    if (ec == asio::experimental::error::channel_closed || ec == asio::experimental::error::channel_cancelled) {
+    if (ec == asio::experimental::error::channel_closed || ec == asio::experimental::error::channel_cancelled)
+    {
         SPDLOG_DEBUG("sender ec:{}", ec.message());
         ec.clear();
+    }
+    else if (ec)
+    {
+        SPDLOG_ERROR("sender exiting with ec: {}", ec.message());
     }
 }
