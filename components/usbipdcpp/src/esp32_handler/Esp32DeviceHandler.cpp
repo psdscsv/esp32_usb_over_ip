@@ -206,7 +206,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(std::uint32_t seqnum, c
 
     // 限制最大传输大小，临时回退为 8KB 以避免一次性分配过大缓冲导致 OOM
     // 若需要更稳定的长传输，请考虑流式发送或更严格的并发控制
-    const uint32_t MAX_TRANSFER_SIZE = 8192; // 8KB最大（临时）
+    const uint32_t MAX_TRANSFER_SIZE = 65536; // 最大传输
     uint32_t adjusted_length = std::min(transfer_buffer_length, MAX_TRANSFER_SIZE);
 
     // 对于IN传输，ESP32 USB Host 要求 num_bytes 为最大包大小的整数倍，
@@ -230,7 +230,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(std::uint32_t seqnum, c
     {
         ESP_LOGI(TAG, "大请求走分片路径: seqnum=%u, total_len=%u, CHUNK_SIZE=%u, heap=%d",
                  seqnum, transfer_buffer_length, CHUNK_SIZE, esp_get_free_heap_size());
-        heap_caps_print_heap_info(MALLOC_CAP_DEFAULT);
+        // heap_caps_print_heap_info(MALLOC_CAP_DEFAULT);
 
         size_t remaining = transfer_buffer_length;
         auto aggregated = std::make_shared<data_type>();
@@ -355,8 +355,8 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(std::uint32_t seqnum, c
              seqnum, transfer_buffer_length, adjusted_length, esp_get_free_heap_size());
 
     usb_transfer_t *transfer = nullptr;
-    ESP_LOGI(TAG, "申请单次transfer: seqnum=%u, adjusted_length=%u, heap=%d", seqnum, adjusted_length, esp_get_free_heap_size());
-    heap_caps_print_heap_info(MALLOC_CAP_DEFAULT);
+    // ESP_LOGI(TAG, "申请单次transfer: seqnum=%u, adjusted_length=%u, heap=%d", seqnum, adjusted_length, esp_get_free_heap_size());
+    // heap_caps_print_heap_info(MALLOC_CAP_DEFAULT);
 
     auto err = usb_host_transfer_alloc(adjusted_length, 0, &transfer);
     if (err != ESP_OK)
@@ -452,7 +452,7 @@ void usbipdcpp::Esp32DeviceHandler::check_and_clean_memory()
             }
 
             // 强制垃圾回收
-            heap_caps_print_heap_info(MALLOC_CAP_DEFAULT);
+            // heap_caps_print_heap_info(MALLOC_CAP_DEFAULT);
         }
     }
 }
@@ -1017,8 +1017,7 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
                 }
             }
 
-            ESP_LOGI(TAG, "返回数据: seq=%u, 实际长度=%zu, 请求长度=%u",
-                     callback_arg.seqnum, actual_data_len, callback_arg.original_transfer_buffer_length);
+            ESP_LOGI(TAG, "返回数据: seq=%u, 实际长度=%zu, 请求长度=%u", callback_arg.seqnum, actual_data_len, callback_arg.original_transfer_buffer_length);
         }
 
         // 发送响应

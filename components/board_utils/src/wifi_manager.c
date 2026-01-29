@@ -61,6 +61,7 @@ static void url_decode(const char *src, char *dst, size_t dst_size)
     }
     dst[j] = '\0';
 }
+
 // 启动AP模式
 static void wifi_start_ap(void)
 {
@@ -123,6 +124,7 @@ static void wifi_stop_ap(void)
 
     ESP_LOGI(TAG, "AP模式已停止");
 }
+
 // WiFi事件处理
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
@@ -564,8 +566,13 @@ static esp_err_t web_config_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-// 启动Web服务器
-static void start_webserver(void)
+/**
+ * @brief 启动Web服务器
+ *
+ * 启动配置Web服务器用于WiFi配置，端口为WEB_PORT。
+ * 如果服务器已启动，则直接返回。
+ */
+static void wifi_start_webserver(void)
 {
     if (s_http_server != NULL)
     {
@@ -707,7 +714,7 @@ void wifi_init(void)
     wifi_start_ap();
 
     // 启动Web服务器
-    start_webserver();
+    wifi_start_webserver();
 
     ESP_LOGI(TAG, "AP配网模式已启动");
     ESP_LOGI(TAG, "请连接WiFi: %s", CONFIG_AP_SSID);
@@ -815,6 +822,6 @@ void wifi_reconnect(void)
     {
         ESP_LOGW(TAG, "重新连接失败，启动AP模式");
         wifi_start_ap();
-        start_webserver();
+        wifi_start_webserver();
     }
 }

@@ -1,11 +1,12 @@
 idf_component_register(
-    SRCS "usbipd_server_test.cpp"
+    SRCS 
+    "usbipd_server.cpp"
+    "main.cpp"
     INCLUDE_DIRS "."
     REQUIRES
         asio
         spdlog
         nvs_flash
-        esp_wifi
         pthread
         usb
         usbipdcpp
