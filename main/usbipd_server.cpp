@@ -15,6 +15,8 @@
 #include "mock_mouse.h"
 #include "wifi_manager.h"
 
+#include <lwip/tcp.h>
+#include <lwip/netif.h>
 using namespace std;
 
 const char *UsbipServer::TAG = "usbip_server";

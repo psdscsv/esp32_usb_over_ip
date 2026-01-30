@@ -69,35 +69,6 @@ void usbipdcpp::Esp32DeviceHandler::handle_control_urb(
     SPDLOG_DEBUG("控制请求: bmRequestType={:02x}, bRequest={}, wValue={}, wIndex={}, wLength={}",
                  setup_packet.request_type, setup_packet.request,
                  setup_packet.value, setup_packet.index, setup_packet.length);
-
-    // 对于标准设备请求，我们不应该拦截，让它们正常执行
-    bool should_intercept = false;
-    /*
-        // 只拦截我们知道会有问题的请求
-        if (setup_packet.is_set_configuration_cmd())
-        {
-            // SET_CONFIGURATION 请求对于U盘是必要的，不能拦截
-            // 但是ESP32可能已经设置了配置，我们可以模拟成功
-            if (setup_packet.value == 1)
-            { // 配置值为1（通常的配置值）
-                SPDLOG_INFO("模拟SET_CONFIGURATION请求成功，配置值=1");
-                should_intercept = true;
-            }
-        }
-
-        if (should_intercept)
-        {
-            SPDLOG_INFO("拦截了控制包：{}", seqnum);
-            session.load()->submit_ret_submit(UsbIpResponse::UsbIpRetSubmit::create_ret_submit(
-                seqnum,
-                static_cast<std::uint32_t>(UrbStatusType::StatusOK),
-                0,
-                0,
-                {},
-                {}));
-            return;
-        }
-    */
     // 其他控制请求正常处理
     SPDLOG_DEBUG("控制传输 {}，ep addr: {:02x}",
                  ep.direction() == UsbEndpoint::Direction::Out ? "Out" : "In",
@@ -225,7 +196,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(std::uint32_t seqnum, c
     // 如果请求很大（例如 64KB），一次性分配可能会导致内存不足。
     // 对于 IN（设备->主机）传输，我们按小块（CHUNK_SIZE）同步读取并合并结果，
     // 避免一次性分配过大的缓冲区导致 std::bad_alloc。
-    const std::size_t CHUNK_SIZE = 8 * 1024; // 8KB
+    const std::size_t CHUNK_SIZE = 32 * 1024; // 8KB
     if (!is_out && transfer_buffer_length > CHUNK_SIZE)
     {
         ESP_LOGI(TAG, "大请求走分片路径: seqnum=%u, total_len=%u, CHUNK_SIZE=%u, heap=%d",
@@ -727,11 +698,6 @@ esp_err_t usbipdcpp::Esp32DeviceHandler::tweak_clear_halt_cmd(const SetupPacket 
 
 esp_err_t usbipdcpp::Esp32DeviceHandler::tweak_set_interface_cmd(const SetupPacket &setup_packet)
 {
-    uint16_t alternate = setup_packet.value;
-    uint16_t interface = setup_packet.index;
-
-    SPDLOG_DEBUG("set_interface: inf {} alt {}",
-                 interface, alternate);
 
     // 使用sync_control_transfer实际执行控制传输
     auto err = sync_control_transfer(setup_packet);

@@ -10,6 +10,9 @@
 #include "protocol.h"
 #include "utils.h"
 
+#include <lwip/sockets.h>
+#include "esp_log.h"
+
 usbipdcpp::Session::Session(Server &server) : server(server),
                                               socket(session_io_context)
 {

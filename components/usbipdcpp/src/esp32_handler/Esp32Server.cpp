@@ -21,6 +21,7 @@ usbipdcpp::Esp32Server::Esp32Server() : host_client_handle(nullptr)
 void usbipdcpp::Esp32Server::init_client()
 {
     const usb_host_client_config_t client_config = {
+        .is_synchronous = false,
         .max_num_event_msg = 15,
         .async = {
             .client_event_callback = client_event_callback,
@@ -197,7 +198,8 @@ void usbipdcpp::Esp32Server::bind_host_device(usb_device_handle_t dev)
                     intf_desc->bInterfaceClass,
                     intf_desc->bInterfaceSubClass,
                     intf_desc->bInterfaceProtocol,
-                    std::move(endpoints)});
+                    std::move(endpoints),
+                    nullptr});
         }
         catch (const std::bad_alloc &e)
         {

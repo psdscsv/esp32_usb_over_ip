@@ -6,9 +6,6 @@
 #include "wifi_manager.h"
 #include "led_manager.h"
 
-#include "esp_netif.h"
-#include "lwip/opt.h"
-
 using namespace std;
 const char *TAG = "main";
 // LED配置
@@ -18,28 +15,6 @@ static const led_config_t led_config = {
     .brightness = 64     // 亮度 (0-255)
 };
 static led_handle_t *led_handle = NULL;
-
-void optimize_tcp_settings()
-{
-    // 增大TCP窗口大小
-    lwip_tcp_set_recv_wnd(65535);
-    lwip_tcp_set_send_buf(65535);
-
-    // 开启TCP快速重传和快速恢复
-    lwip_tcp_set_fast_retransmit(1);
-    lwip_tcp_set_fast_recovery(1);
-
-    // 增大最大分段大小（MSS）
-    // 标准以太网MTU是1500，TCP头部40字节，所以MSS=1460
-    // 可以通过调整MTU增加MSS
-    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-    if (netif)
-    {
-        // 设置MTU为1600（如果路由器支持Jumbo Frame）
-        esp_netif_set_mtu(netif, 1600);
-        ESP_LOGI("Network", "MTU set to 1600");
-    }
-}
 
 // 按钮状态监控任务
 static void button_monitor_task(void *arg)
@@ -163,7 +138,6 @@ void setup()
             ESP_LOGW(TAG, "WiFi connection timeout after %d seconds, continuing anyway", max_wait);
         }
     }
-
     // 初始化按钮
     {
         esp_err_t ret = button_init();
@@ -185,7 +159,6 @@ void setup()
 extern "C" void app_main(void)
 {
     setup();
-
     // 创建服务器实例
     UsbipServer server;
 
