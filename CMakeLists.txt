@@ -4,3 +4,12 @@ cmake_minimum_required(VERSION 3.16)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(usbipd_server_test)
+
+if(CONFIG_ESP32_SPIRAM_SUPPORT)
+    message(STATUS "PSRAM support enabled")
+    
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE
+        CONFIG_ESP32_SPIRAM_SUPPORT=1
+    )
+    
+endif()
