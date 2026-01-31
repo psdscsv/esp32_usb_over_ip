@@ -153,6 +153,15 @@ void UsbipServer::thread_main()
     ESP_LOGI(TAG, "Starting USB/IP server on port %d", listening_port);
     server->start(endpoint);
 
+    // 设置TCP优化参数
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    int buf_size = 128 * 1024; // 128KB缓冲区
+    setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &buf_size, sizeof(buf_size));
+    setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &buf_size, sizeof(buf_size));
+
+    int nodelay = 1;
+    setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+
     // 主循环
     ESP_LOGI(TAG, "Entering main loop...");
     while (true)

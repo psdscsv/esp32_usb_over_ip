@@ -30,7 +30,15 @@ namespace usbipdcpp
         explicit Session(Server &server);
         Session(const Session &) = delete;
         Session(Session &&) = delete;
+        // 批量处理配置
+        struct BatchConfig
+        {
+            size_t max_batch_size = 32;                   // 最大批量大小
+            size_t max_batch_bytes = 65536;               // 最大批量字节数
+            std::chrono::milliseconds max_batch_delay{5}; // 最大等待时间
+        };
 
+        void set_batch_config(const BatchConfig &config);
         /**
          * @brief 线程安全，用来查询某一序列是否被unlink了。
          * @param seqnum
@@ -68,6 +76,16 @@ namespace usbipdcpp
         ~Session();
 
     private:
+        // 批量处理相关成员
+        BatchConfig batch_config_;
+        std::vector<std::pair<std::uint32_t, UsbIpCommand::UsbIpCmdSubmit>> batch_buffer_;
+        std::chrono::steady_clock::time_point batch_start_time_;
+        bool batch_processing_ = false;
+
+        // 批量处理方法
+        asio::awaitable<void> receiver_batch(usbipdcpp::error_code &receiver_ec);
+        asio::awaitable<void> receiver_single(usbipdcpp::error_code &receiver_ec);
+        void process_batch();
         /**
          * @brief 新建Session时由Server调用
          */

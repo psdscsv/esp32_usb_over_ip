@@ -29,6 +29,6 @@ Default log verbosity
 #define CAM_HREF_GPIO_NUM 10
 #define CAM_PCLK_GPIO_NUM 16
 // 按钮引脚定义
-#define BOOT_BUTTON_GPIO GPIO_NUM_0 // 模式切换按钮
-#define BUTTON1_GPIO GPIO_NUM_14    // 子选项切换按钮
-#define BUTTON2_GPIO GPIO_NUM_39    // 确认按钮
+#define BOOT_BUTTON_GPIO 0 // 模式切换按钮
+#define BUTTON1_GPIO 14    // 子选项切换按钮
+#define BUTTON2_GPIO 39    // 确认按钮

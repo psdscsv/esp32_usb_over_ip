@@ -108,7 +108,7 @@ namespace usbipdcpp
 
         // 最大并发传输数限制。ESP32 内存有限，过高会导致分配大缓冲区失败（std::bad_alloc）。
         // 将该值保守设置为较小的数以降低同时分配大缓冲区的风险。
-        static constexpr size_t MAX_CONCURRENT_TRANSFERS = 500;
+        static constexpr size_t MAX_CONCURRENT_TRANSFERS = 128;
         std::atomic<size_t> concurrent_transfer_count{0};
     };
 }

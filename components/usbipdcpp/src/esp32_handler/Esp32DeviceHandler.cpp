@@ -175,9 +175,8 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(std::uint32_t seqnum, c
     concurrent_transfer_count++;
     bool is_out = !ep.is_in();
 
-    // 限制最大传输大小，临时回退为 8KB 以避免一次性分配过大缓冲导致 OOM
     // 若需要更稳定的长传输，请考虑流式发送或更严格的并发控制
-    const uint32_t MAX_TRANSFER_SIZE = 65536; // 最大传输
+    const uint32_t MAX_TRANSFER_SIZE = 64 * 1024; // 最大传输
     uint32_t adjusted_length = std::min(transfer_buffer_length, MAX_TRANSFER_SIZE);
 
     // 对于IN传输，ESP32 USB Host 要求 num_bytes 为最大包大小的整数倍，
@@ -199,9 +198,8 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(std::uint32_t seqnum, c
     const std::size_t CHUNK_SIZE = 32 * 1024; // 8KB
     if (!is_out && transfer_buffer_length > CHUNK_SIZE)
     {
-        ESP_LOGI(TAG, "大请求走分片路径: seqnum=%u, total_len=%u, CHUNK_SIZE=%u, heap=%d",
-                 seqnum, transfer_buffer_length, CHUNK_SIZE, esp_get_free_heap_size());
-        // heap_caps_print_heap_info(MALLOC_CAP_DEFAULT);
+        // ESP_LOGI(TAG, "大请求走分片路径: seqnum=%u, total_len=%u, CHUNK_SIZE=%u, heap=%d",seqnum, transfer_buffer_length, CHUNK_SIZE, esp_get_free_heap_size());
+        //  heap_caps_print_heap_info(MALLOC_CAP_DEFAULT);
 
         size_t remaining = transfer_buffer_length;
         auto aggregated = std::make_shared<data_type>();
@@ -322,8 +320,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(std::uint32_t seqnum, c
         return;
     }
 
-    ESP_LOGI(TAG, "块传输请求: seqnum=%u, len=%u->%u, heap=%d",
-             seqnum, transfer_buffer_length, adjusted_length, esp_get_free_heap_size());
+    // ESP_LOGI(TAG, "块传输请求: seqnum=%u, len=%u->%u, heap=%d",seqnum, transfer_buffer_length, adjusted_length, esp_get_free_heap_size());
 
     usb_transfer_t *transfer = nullptr;
     // ESP_LOGI(TAG, "申请单次transfer: seqnum=%u, adjusted_length=%u, heap=%d", seqnum, adjusted_length, esp_get_free_heap_size());
@@ -395,7 +392,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(std::uint32_t seqnum, c
 void usbipdcpp::Esp32DeviceHandler::check_and_clean_memory()
 {
     auto now = std::chrono::steady_clock::now();
-    if (now - last_memory_check > std::chrono::seconds(5))
+    if (now - last_memory_check > std::chrono::seconds(30))
     {
         last_memory_check = now;
 
@@ -621,22 +618,19 @@ void usbipdcpp::Esp32DeviceHandler::cancel_endpoint_all_transfers(uint8_t bEndpo
 {
     std::lock_guard lock(endpoint_cancellation_mutex);
     esp_err_t err;
-    err = usb_host_endpoint_halt(native_handle, bEndpointAddress);
-    if (err != ESP_OK)
-    {
-        SPDLOG_ERROR("usb_host_endpoint_halt address {} failed: {}", bEndpointAddress, esp_err_to_name(err));
-    }
-    err = usb_host_endpoint_flush(native_handle, bEndpointAddress);
-    if (err != ESP_OK)
-    {
-        SPDLOG_ERROR("usb_host_endpoint_flush address {} failed: {}", bEndpointAddress, esp_err_to_name(err));
-    }
+
+    // 只执行必要的清理，避免过度操作
     err = usb_host_endpoint_clear(native_handle, bEndpointAddress);
     if (err != ESP_OK)
     {
-        SPDLOG_ERROR("usb_host_endpoint_clear address {} failed: {}", bEndpointAddress, esp_err_to_name(err));
+        SPDLOG_WARN("usb_host_endpoint_clear address {} failed: {}",
+                    bEndpointAddress, esp_err_to_name(err));
     }
+
+    // 延迟后重置端点
+    vTaskDelay(pdMS_TO_TICKS(10));
 }
+
 esp_err_t usbipdcpp::Esp32DeviceHandler::sync_control_transfer(const SetupPacket &setup_packet) const
 {
     usb_transfer_t *transfer = nullptr;
@@ -864,8 +858,7 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
     static int callback_count = 0;
     if (++callback_count % 10 == 0)
     {
-        ESP_LOGI(TAG, "transfer_callback #%d, heap: %d, trx_size: %d",
-                 callback_count, esp_get_free_heap_size(), trx->num_bytes);
+        // ESP_LOGI(TAG, "transfer_callback #%d, heap: %d, trx_size: %d",callback_count, esp_get_free_heap_size(), trx->num_bytes);
     }
 
     if (callback_arg.handler.all_transfer_should_stop)
@@ -983,7 +976,7 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
                 }
             }
 
-            ESP_LOGI(TAG, "返回数据: seq=%u, 实际长度=%zu, 请求长度=%u", callback_arg.seqnum, actual_data_len, callback_arg.original_transfer_buffer_length);
+            // ESP_LOGI(TAG, "返回数据: seq=%u, 实际长度=%zu, 请求长度=%u", callback_arg.seqnum, actual_data_len, callback_arg.original_transfer_buffer_length);
         }
 
         // 发送响应

@@ -17,6 +17,13 @@ usbipdcpp::Session::Session(Server &server) : server(server),
                                               socket(session_io_context)
 {
 }
+void usbipdcpp::Session::set_batch_config(const BatchConfig &config)
+{
+    batch_config_ = config;
+    SPDLOG_INFO("批量配置: 最大批量={}, 最大字节={}, 最大延迟={}ms",
+                config.max_batch_size, config.max_batch_bytes,
+                config.max_batch_delay.count());
+}
 
 std::tuple<bool, std::uint32_t> usbipdcpp::Session::get_unlink_seqnum(std::uint32_t seqnum)
 {
@@ -27,7 +34,173 @@ std::tuple<bool, std::uint32_t> usbipdcpp::Session::get_unlink_seqnum(std::uint3
     }
     return {false, 0};
 }
+asio::awaitable<void> usbipdcpp::Session::receiver_batch(usbipdcpp::error_code &receiver_ec)
+{
+    SPDLOG_INFO("启用批量处理模式");
 
+    batch_buffer_.reserve(batch_config_.max_batch_size);
+    batch_start_time_ = std::chrono::steady_clock::now();
+
+    while (!should_immediately_stop)
+    {
+        usbipdcpp::error_code ec;
+
+        // 读取单个命令
+        auto command = co_await UsbIpCommand::get_cmd_from_socket(socket, ec);
+
+        if (ec)
+        {
+            SPDLOG_DEBUG("从socket中获取命令时出错：{}", ec.message());
+            receiver_ec = ec;
+
+            // 处理缓冲区中剩余的命令
+            if (!batch_buffer_.empty())
+            {
+                process_batch();
+            }
+            break;
+        }
+
+        if (should_immediately_stop)
+            break;
+
+        // 处理命令
+        co_await std::visit([&, this](auto &&cmd) -> asio::awaitable<void>
+                            {
+            using T = std::remove_cvref_t<decltype(cmd)>;
+            
+            if constexpr (std::is_same_v<UsbIpCommand::UsbIpCmdSubmit, T>) {
+                // 将Submit命令添加到批量缓冲区
+                batch_buffer_.emplace_back(cmd.header.seqnum, std::move(cmd));
+                
+                auto now = std::chrono::steady_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - batch_start_time_);
+                
+                // 检查是否需要处理当前批次
+                bool should_process = false;
+                
+                // 1. 达到最大批量大小
+                if (batch_buffer_.size() >= batch_config_.max_batch_size) {
+                    SPDLOG_TRACE("达到最大批量大小: {}", batch_buffer_.size());
+                    should_process = true;
+                }
+                // 2. 达到最大延迟
+                else if (elapsed >= batch_config_.max_batch_delay) {
+                    SPDLOG_TRACE("达到最大延迟: {}ms", elapsed.count());
+                    should_process = true;
+                }
+                // 3. 缓冲区已满（按字节计算）
+                // 这里可以添加按字节计算的逻辑
+                
+                if (should_process && !batch_buffer_.empty()) {
+                    process_batch();
+                    batch_start_time_ = now;
+                }
+            }
+            else if constexpr (std::is_same_v<UsbIpCommand::UsbIpCmdUnlink, T>) {
+                // Unlink命令立即处理，不进入批量缓冲区
+                SPDLOG_TRACE("收到UsbIpCmdUnlink包，序列号: {}", cmd.header.seqnum);
+                
+                {
+                    std::lock_guard lock(unlink_map_mutex);
+                    unlink_map.emplace(cmd.unlink_seqnum, cmd.header.seqnum);
+                }
+                current_import_device->handle_unlink_seqnum(cmd.unlink_seqnum);
+            }
+            else if constexpr (std::is_same_v<std::monostate, T>) {
+                SPDLOG_ERROR("收到未知包");
+                receiver_ec = make_error_code(ErrorType::UNKNOWN_CMD);
+            }
+            else {
+                static_assert(!std::is_same_v<T, T>);
+            }
+            co_return; }, command);
+    }
+
+    // 清理缓冲区
+    if (!batch_buffer_.empty())
+    {
+        process_batch();
+    }
+
+    // 原有的清理逻辑
+    current_import_device->on_disconnection(receiver_ec);
+    transfer_channel->close();
+
+    server.try_moving_device_to_available(*current_import_device_id);
+    current_import_device_id.reset();
+    current_import_device.reset();
+    SPDLOG_TRACE("将当前导入设备的busid设为空");
+}
+void usbipdcpp::Session::process_batch()
+{
+    if (batch_buffer_.empty() || !current_import_device)
+    {
+        return;
+    }
+
+    SPDLOG_DEBUG("开始处理批量命令，数量: {}", batch_buffer_.size());
+
+    auto start_time = std::chrono::steady_clock::now();
+
+    // 批量处理所有命令
+    for (auto &[seqnum, cmd] : batch_buffer_)
+    {
+        auto real_ep = cmd.header.direction == UsbIpDirection::Out
+                           ? static_cast<std::uint8_t>(cmd.header.ep)
+                           : (static_cast<std::uint8_t>(cmd.header.ep) | 0x80);
+
+        auto ep_find_ret = current_import_device->find_ep(real_ep);
+
+        if (ep_find_ret.has_value())
+        {
+            auto &ep = ep_find_ret->first;
+            auto &intf = ep_find_ret->second;
+
+            usbipdcpp::error_code ec_during_handling_urb;
+
+            // 提交给设备处理
+            current_import_device->handle_urb(
+                cmd,
+                seqnum,
+                ep,
+                intf,
+                cmd.transfer_buffer_length,
+                cmd.setup,
+                cmd.data,
+                cmd.iso_packet_descriptor,
+                ec_during_handling_urb);
+
+            if (ec_during_handling_urb)
+            {
+                SPDLOG_ERROR("批量处理中出错 seq={}: {}", seqnum, ec_during_handling_urb.message());
+                // 发送错误响应
+                auto error_response = UsbIpResponse::UsbIpRetSubmit::usbip_ret_submit_fail_with_status(
+                    seqnum, EPIPE);
+                submit_ret_submit(std::move(error_response));
+            }
+        }
+        else
+        {
+            SPDLOG_WARN("批量处理找不到端点 {}，seq={}", real_ep, seqnum);
+            auto error_response = UsbIpResponse::UsbIpRetSubmit::usbip_ret_submit_fail_with_status(
+                seqnum, EPIPE);
+            submit_ret_submit(std::move(error_response));
+        }
+    }
+
+    auto end_time = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        end_time - start_time);
+
+    SPDLOG_DEBUG("批量处理完成，数量: {}，耗时: {}μs，平均: {}μs/命令",
+                 batch_buffer_.size(), duration.count(),
+                 duration.count() / batch_buffer_.size());
+
+    // 清空缓冲区
+    batch_buffer_.clear();
+}
 void usbipdcpp::Session::remove_seqnum_unlink(std::uint32_t seqnum)
 {
     std::lock_guard lock(unlink_map_mutex);
@@ -275,8 +448,22 @@ asio::awaitable<void> usbipdcpp::Session::transfer_loop(usbipdcpp::error_code &t
     }
     cmd_transferring = false;
 }
-
 asio::awaitable<void> usbipdcpp::Session::receiver(usbipdcpp::error_code &receiver_ec)
+{
+    // 检查是否启用批量模式
+    static bool enable_batch_mode = true; // 可以改为配置项
+
+    if (enable_batch_mode)
+    {
+        co_await receiver_batch(receiver_ec);
+    }
+    else
+    {
+        // 使用原始的单命令处理模式
+        co_await receiver_single(receiver_ec);
+    }
+}
+asio::awaitable<void> usbipdcpp::Session::receiver_single(usbipdcpp::error_code &receiver_ec)
 {
     spdlog::info("should_immediately_stop:{}", should_immediately_stop.load());
     while (!should_immediately_stop)
