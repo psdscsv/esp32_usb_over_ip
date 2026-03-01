@@ -11,6 +11,7 @@ idf_component_register(
         usb
         usbipdcpp
         board_utils
+        esp_timer
 )
 
 add_compile_definitions(
