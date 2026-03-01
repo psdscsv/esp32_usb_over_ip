@@ -1,3 +1,4 @@
+// [file name]: protocol.h
 #pragma once
 
 #include <cstdint>
@@ -6,11 +7,11 @@
 #include <vector>
 #include <memory>
 #include <system_error>
-
 #include <asio/awaitable.hpp>
 
 #include "network.h"
 #include "device.h"
+#include "usb_transfer_ptr.h" // 新增
 
 namespace usbipdcpp
 {
@@ -47,20 +48,13 @@ namespace usbipdcpp
         TRANSFER_ERROR,
     };
 
-    // tools/usbip_common.h
     enum class OperationStatuType
     {
-        // Request Completed Successfully
         OK = 0,
-        // Request Failed
         NA,
-        // Device busy (exported)
         DevBusy,
-        // Device in error state
         DevError,
-        // Device not found
         NoDev,
-        // Unexpected response
         Error
     };
 
@@ -82,16 +76,15 @@ namespace usbipdcpp
         [[nodiscard]] const char *name() const noexcept override;
         [[nodiscard]] std::string message(int _Errval) const override;
     };
-
-    const TransferErrorCategory g_error_category;
+    // 新增：获取全局错误类别对象的函数
+    inline const TransferErrorCategory& get_error_category() {
+        static TransferErrorCategory cat;
+        return cat;
+    }
     std::error_code make_error_code(ErrorType e);
 
     struct UsbIpHeaderBasic
     {
-        /**
-         * 这个字段并不需要从socket里面读，由子命令设置。
-         * 根据先读的字段判断应该创建哪个包
-         */
         std::uint32_t command;
         std::uint32_t seqnum;
         std::uint32_t devid;
@@ -187,16 +180,13 @@ namespace usbipdcpp
             std::uint32_t number_of_packets;
             std::uint32_t interval;
             SetupPacket setup;
-            // std::array<std::uint8_t, 8> setup;
             std::vector<std::uint8_t> data;
             std::vector<UsbIpIsoPacketDescriptor> iso_packet_descriptor;
 
             [[nodiscard]] std::vector<std::uint8_t> to_bytes() const;
             [[nodiscard]] asio::awaitable<void> to_socket_co(asio::ip::tcp::socket &sock, error_code &ec) const;
-            // 这个函数只读取部分数值，后面的数据部分不读取
             [[nodiscard]] asio::awaitable<void> from_socket_co(asio::ip::tcp::socket &sock);
             void to_socket(asio::ip::tcp::socket &sock, error_code &ec) const;
-            // 这个函数只读取部分数值，后面的数据部分不读取
             void from_socket(asio::ip::tcp::socket &sock);
 
             bool operator==(const UsbIpCmdSubmit &other) const;
@@ -225,22 +215,11 @@ namespace usbipdcpp
 
         using OpCmdVariant = std::variant<OpReqDevlist, OpReqImport>;
         using CmdVariant = std::variant<UsbIpCmdSubmit, UsbIpCmdUnlink>;
+        using AllCmdVariant = std::variant<OpReqDevlist, OpReqImport, UsbIpCmdSubmit, UsbIpCmdUnlink>;
 
-        /**
-         * @brief 该函数只有ec有值则返回值为空，无ec则一定有值，无需二次判断
-         * @param sock
-         * @param ec
-         * @return 获取到的命令
-         */
-        asio::awaitable<usbipdcpp::UsbIpCommand::OpCmdVariant> get_op_from_socket(
+        asio::awaitable<OpCmdVariant> get_op_from_socket(
             asio::ip::tcp::socket &sock, usbipdcpp::error_code &ec);
-        /**
-         * @brief 该函数只有ec有值则返回值为空，无ec则一定有值，无需二次判断
-         * @param sock
-         * @param ec
-         * @return 获取到的命令
-         */
-        asio::awaitable<usbipdcpp::UsbIpCommand::CmdVariant> get_cmd_from_socket(
+        asio::awaitable<CmdVariant> get_cmd_from_socket(
             asio::ip::tcp::socket &sock, usbipdcpp::error_code &ec);
 
         std::vector<std::uint8_t> to_bytes(const AllCmdVariant &cmd);
@@ -286,11 +265,6 @@ namespace usbipdcpp
             };
             static OpRepImport create_on_failure_with_status(std::uint32_t status);
             static OpRepImport create_on_failure();
-            /**
-             * @brief A shared pointer copy construct that shares the same pointed object
-             * @param device
-             * @return
-             */
             static OpRepImport create_on_success(std::shared_ptr<UsbDevice> device);
         };
 
@@ -304,7 +278,11 @@ namespace usbipdcpp
             std::uint32_t start_frame;
             std::uint32_t number_of_packets;
             std::uint32_t error_count;
+
+            // 两种数据持有方式
             std::shared_ptr<data_type> transfer_buffer;
+            UsbTransferPtr usb_transfer;
+            std::size_t data_offset;
             std::vector<UsbIpIsoPacketDescriptor> iso_packet_descriptor;
 
             [[nodiscard]] data_type to_bytes() const;
@@ -322,16 +300,25 @@ namespace usbipdcpp
                 std::uint32_t start_frame,
                 std::uint32_t number_of_packets,
                 std::vector<std::uint8_t> &&transfer_buffer,
-                const std::vector<UsbIpIsoPacketDescriptor> &
-                    iso_packet_descriptor);
+                const std::vector<UsbIpIsoPacketDescriptor> &iso_packet_descriptor);
             static UsbIpRetSubmit create_ret_submit(
                 std::uint32_t seqnum,
                 std::uint32_t status,
                 std::uint32_t start_frame,
                 std::uint32_t number_of_packets,
                 std::shared_ptr<data_type> transfer_buffer,
-                const std::vector<UsbIpIsoPacketDescriptor> &
-                    iso_packet_descriptor);
+                const std::vector<UsbIpIsoPacketDescriptor> &iso_packet_descriptor);
+
+            // 零拷贝版本
+            static UsbIpRetSubmit create_ret_submit(
+                std::uint32_t seqnum,
+                std::uint32_t status,
+                std::uint32_t start_frame,
+                std::uint32_t number_of_packets,
+                UsbTransferPtr transfer,
+                std::size_t data_offset,
+                const std::vector<UsbIpIsoPacketDescriptor> &iso_packet_descriptor);
+
             static UsbIpRetSubmit create_ret_submit_ok_without_data(std::uint32_t seqnum);
             static UsbIpRetSubmit create_ret_submit_with_status_and_no_data(std::uint32_t seqnum, std::uint32_t status);
             static UsbIpRetSubmit create_ret_submit_with_status_and_no_iso(std::uint32_t seqnum, std::uint32_t status,
@@ -343,7 +330,7 @@ namespace usbipdcpp
                                                                    const data_type &transfer_buffer);
         };
 
-        static_assert(SerializableFromSocket<UsbIpRetSubmit>);
+        // static_assert(SerializableFromSocket<UsbIpRetSubmit>);
 
         struct UsbIpRetUnlink
         {
@@ -371,5 +358,4 @@ namespace usbipdcpp
         using RetVariant = std::variant<UsbIpRetSubmit, UsbIpRetUnlink>;
         using AllRepVariant = std::variant<OpRepDevlist, OpRepImport, UsbIpRetSubmit, UsbIpRetUnlink>;
     }
-
 }

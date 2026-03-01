@@ -2,6 +2,9 @@
 
 #include <map>
 #include <shared_mutex>
+#include <atomic>
+#include <chrono>
+#include <memory>
 
 #include <asio.hpp>
 #include <usb/usb_host.h>
@@ -9,6 +12,9 @@
 #include "DeviceHandler/DeviceHandler.h"
 #include "SetupPacket.h"
 #include "esp32_handler/tools.h"
+
+// 前向声明
+struct usb_transfer;
 
 namespace usbipdcpp
 {
@@ -82,7 +88,7 @@ namespace usbipdcpp
             std::uint32_t seqnum;
             usb_transfer_type_t transfer_type;
             bool is_out;
-            std::uint32_t original_transfer_buffer_length; // 添加的字段
+            std::uint32_t original_transfer_buffer_length;
             bool counted_in_concurrent = false;
         };
 
@@ -98,7 +104,6 @@ namespace usbipdcpp
         usb_host_client_handle_t host_client_handle;
 
         std::atomic_bool all_transfer_should_stop = false;
-
         std::atomic_bool has_device = true;
 
     private:
@@ -106,9 +111,12 @@ namespace usbipdcpp
         void check_and_clean_memory();
         std::chrono::steady_clock::time_point last_memory_check;
 
-        // 最大并发传输数限制。ESP32 内存有限，过高会导致分配大缓冲区失败（std::bad_alloc）。
-        // 将该值保守设置为较小的数以降低同时分配大缓冲区的风险。
+        // 最大并发传输数限制
         static constexpr size_t MAX_CONCURRENT_TRANSFERS = 128;
         std::atomic<size_t> concurrent_transfer_count{0};
+
+        // 统计零拷贝传输次数
+        std::atomic<uint32_t> zero_copy_count{0};
+        std::atomic<uint32_t> total_transfer_count{0};
     };
 }

@@ -593,31 +593,34 @@ asio::awaitable<void> usbipdcpp::Session::receiver_single(usbipdcpp::error_code 
     current_import_device.reset();
     SPDLOG_TRACE("将当前导入设备的busid设为空");
 }
-
 asio::awaitable<void> usbipdcpp::Session::sender(usbipdcpp::error_code &ec)
 {
     while (!should_immediately_stop)
     {
-        // 不停从channel中获取数据
         auto send_data = co_await transfer_channel->async_receive(asio::redirect_error(asio::use_awaitable, ec));
         if (ec)
         {
-            SPDLOG_ERROR("transfer_channel async_receive error: {}", ec.message());
+            if (ec != asio::experimental::error::channel_closed)
+            {
+                SPDLOG_ERROR("transfer_channel async_receive error: {}", ec.message());
+            }
             break;
         }
-        SPDLOG_TRACE("channel收到消息");
+
+        SPDLOG_TRACE("channel收到消息，准备发送");
         error_code sending_ec;
+
         co_await std::visit([&](auto &&cmd) -> asio::awaitable<void>
                             {
             using T = std::remove_cvref_t<decltype(cmd)>;
             if constexpr (std::is_same_v<UsbIpResponse::UsbIpRetSubmit, T>) {
+                // 零拷贝发送 - cmd 会一直存活直到 co_await 完成
                 co_await cmd.to_socket_co(socket, sending_ec);
                 if (sending_ec) {
                     SPDLOG_ERROR("写入 socket 时出错 submit seq={} : {}", cmd.header.seqnum, sending_ec.message());
                 } else {
                     SPDLOG_DEBUG("成功写入 socket submit seq={}", cmd.header.seqnum);
                 }
-                // end_processing_urb();
             }
             else if constexpr (std::is_same_v<UsbIpResponse::UsbIpRetUnlink, T>) {
                 co_await cmd.to_socket_co(socket, sending_ec);
@@ -626,24 +629,23 @@ asio::awaitable<void> usbipdcpp::Session::sender(usbipdcpp::error_code &ec)
                 } else {
                     SPDLOG_DEBUG("成功写入 socket unlink seq={}", cmd.header.seqnum);
                 }
-                // end_processing_urb();
             }
             else if constexpr (std::is_same_v<std::monostate, T>) {
                 SPDLOG_ERROR("收到未知包");
                 sending_ec = make_error_code(ErrorType::UNKNOWN_CMD);
             }
             else {
-                //确保处理了所有可能类型
                 static_assert(!std::is_same_v<T, T>);
             } }, send_data);
+
         if (sending_ec)
         {
             SPDLOG_ERROR("发送到 socket 时发生错误: {}", sending_ec.message());
-            // 将 sending_ec 传回给 caller
             ec = sending_ec;
             break;
         }
     }
+
     if (ec == asio::experimental::error::channel_closed || ec == asio::experimental::error::channel_cancelled)
     {
         SPDLOG_DEBUG("sender ec:{}", ec.message());
