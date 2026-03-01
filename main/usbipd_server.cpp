@@ -12,7 +12,6 @@
 #include <lwip/sockets.h>
 
 #include "esp32_handler/Esp32Server.h"
-#include "mock_mouse.h"
 #include "wifi_manager.h"
 
 #include <lwip/tcp.h>

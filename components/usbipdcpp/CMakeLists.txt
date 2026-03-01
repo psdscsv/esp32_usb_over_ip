@@ -8,7 +8,7 @@ set(USBIPDCPP_ORIGIN_SRC_FILES
         ${USBIPDCPP_BASE_SRC_FILES}
         ${USBIPDCPP_DEVICE_HANDLER_SRC_FILES}
         ${USBIPDCPP_INTERFACE_HANDLER_SRC_FILES}
-        ${usbipdcpp_DIR}/examples/mock_mouse/mock_mouse.cpp
+        # 删除了 mock_mouse.cpp 的引用
 )
 
 file(GLOB USBIPDCPP_ESP32_HANDLER_SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/esp32_handler/*.cpp)
@@ -16,7 +16,7 @@ file(GLOB USBIPDCPP_ESP32_HANDLER_SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/esp3
 set(USBIPDCPP_ALL_SRC_FILES ${USBIPDCPP_ORIGIN_SRC_FILES} ${USBIPDCPP_ESP32_HANDLER_SRC_FILES})
 
 idf_component_register(SRCS ${USBIPDCPP_ALL_SRC_FILES}
-        INCLUDE_DIRS ${usbipdcpp_DIR}/include ${usbipdcpp_DIR}/examples/mock_mouse include
+        INCLUDE_DIRS ${usbipdcpp_DIR}/include include 
         REQUIRES asio lwip sock_utils spdlog usb pthread)
 
 add_compile_definitions(

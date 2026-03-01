@@ -39,9 +39,8 @@ option(
         ${USBIPDCPP_BUILD_EXAMPLE_TERMUX_LIBUSB_SERVER_DEFAULT}
 )
 
-option(USBIPDCPP_BUILD_EXAMPLE_MOCK_MOUSE "Build example mock mouse applications" ${IS_TOP_LEVEL})
 option(USBIPDCPP_BUILD_EXAMPLE_EMPTY_SERVER "Build example empty server applications" ${IS_TOP_LEVEL})
-option(USBIPDCPP_BUILD_LIBUSB_COMPONENTS "Build libusb component" ON)
+option(USBIPDCPP_BUILD_LIBUSB_COMPONENTS "Build libusb component" OFF)
 option(USBIPDCPP_BUILD_TESTS "Build tests" ${IS_TOP_LEVEL})
 
 find_package(asio CONFIG REQUIRED)
@@ -102,13 +101,6 @@ if (USBIPDCPP_BUILD_EXAMPLES)
         else ()
             message(WARNING "evdev is not available in this target")
         endif ()
-    endif ()
-
-    if (USBIPDCPP_BUILD_EXAMPLE_MOCK_MOUSE)
-        file(GLOB_RECURSE MOCK_MOUSE_SRC examples/mock_mouse/*.cpp)
-        add_executable(mock_mouse ${MOCK_MOUSE_SRC})
-        target_link_libraries(mock_mouse ${PROJECT_NAME})
-        target_include_directories(mock_mouse PRIVATE examples/mock_mouse)
     endif ()
 
     if (USBIPDCPP_BUILD_EXAMPLE_EMPTY_SERVER)
