@@ -36,6 +36,13 @@ namespace usbipdcpp
         void handle_control_urb(std::uint32_t seqnum, const UsbEndpoint &ep,
                                 std::uint32_t transfer_flags, std::uint32_t transfer_buffer_length,
                                 const SetupPacket &setup_packet, const data_type &req, std::error_code &ec) override;
+        /**
+         * Bulk 转输。已经改为完全异步：
+         * - 请求长度 <= CONFIG_USB_HOST_BULK_TRANSFER_MAX_SIZE 时一次性提交一个
+         *   transfer
+         * - 超出则并行拆分多个 transfer 并在最后统一响应
+         * 这样避免了早期实现中的同步分片等待，使 USB 和网络数据可以流水线并行。
+         */
         void handle_bulk_transfer(std::uint32_t seqnum, const UsbEndpoint &ep,
                                   UsbInterface &interface, std::uint32_t transfer_flags,
                                   std::uint32_t transfer_buffer_length, const data_type &out_data,
@@ -111,8 +118,14 @@ namespace usbipdcpp
         void check_and_clean_memory();
         std::chrono::steady_clock::time_point last_memory_check;
 
-        // 最大并发传输数限制
-        static constexpr size_t MAX_CONCURRENT_TRANSFERS = 128;
+        // 最大并发传输数限制，可通过 sdkconfig 配置
+#ifdef CONFIG_USBIP_MAX_CONCURRENT_TRANSFERS
+        static constexpr size_t MAX_CONCURRENT_TRANSFERS = CONFIG_USBIP_MAX_CONCURRENT_TRANSFERS;
+#else
+        // 默认较小值以防堆内存突然被抢占，运行时真实并发仍由
+        // concurrent_transfer_count 控制。
+        static constexpr size_t MAX_CONCURRENT_TRANSFERS = 32;
+#endif
         std::atomic<size_t> concurrent_transfer_count{0};
 
         // 统计零拷贝传输次数

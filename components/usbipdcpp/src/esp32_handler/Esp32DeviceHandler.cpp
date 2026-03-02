@@ -1,5 +1,6 @@
 #include "esp32_handler/Esp32DeviceHandler.h"
 
+#include "sdkconfig.h"
 #include <esp_log.h>
 
 #include "Session.h"
@@ -153,6 +154,11 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
     const data_type &out_data,
     [[maybe_unused]] std::error_code &ec)
 {
+    // 本函数已优化为完全异步传输：
+    // - 对于可以一次发送的长度直接分配一个足够大的 transfer 并异步提交
+    // - 只有在请求超过 USB_HOST_BULK_TRANSFER_MAX_SIZE 时使用并行拆分
+    //   （该配置项可以通过 menuconfig 调整，推荐设置为 16K/32K/64K）
+    // 这样就不会在主线程中串行等待 chunk，USB 和网络可以流水线并行。
     if (!has_device)
     {
         ec = make_error_code(ErrorType::NO_DEVICE);
@@ -161,10 +167,12 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
 
     check_and_clean_memory();
 
-    // 检查并发传输数
+    // 检查并发传输数，如果达到上限则立即返回 EPIPE 给客户端。
+    // 也可以在此处将请求排队再处理，但为避免无限制堆积导致内存炸裂，
+    // 默认选择快速拒绝并由上层重试。
     if (concurrent_transfer_count >= MAX_CONCURRENT_TRANSFERS)
     {
-        ESP_LOGW(TAG, "并发传输数达到限制(%zu)，等待", static_cast<size_t>(MAX_CONCURRENT_TRANSFERS));
+        ESP_LOGW(TAG, "并发传输数达到限制(%zu)，返回EPIPE", static_cast<size_t>(MAX_CONCURRENT_TRANSFERS));
         session.load()->submit_ret_submit(
             UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
         return;
@@ -173,10 +181,18 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
     concurrent_transfer_count++;
     bool is_out = !ep.is_in();
 
-    const uint32_t MAX_TRANSFER_SIZE = 64 * 1024;
+    // 最大内部传输长度由 SDK 配置项决定，可在 menuconfig 中调整
+    // CONFIG_USB_HOST_BULK_TRANSFER_MAX_SIZE 默认可能较小，此处为安全回退
+#ifdef CONFIG_USB_HOST_BULK_TRANSFER_MAX_SIZE
+    constexpr uint32_t MAX_TRANSFER_SIZE = CONFIG_USB_HOST_BULK_TRANSFER_MAX_SIZE;
+#else
+    constexpr uint32_t MAX_TRANSFER_SIZE = 64 * 1024;
+#endif
+
+    // 请求长度不超过允许的最大值时直接异步提交一个 transfer
     uint32_t adjusted_length = std::min(transfer_buffer_length, MAX_TRANSFER_SIZE);
 
-    // 对于 IN 传输，对齐到最大包大小
+    // 对于 IN 传输，ESP32 USB Host 要求 num_bytes 为最大包大小的整数倍
     if (!is_out && ep.max_packet_size > 0)
     {
         if (adjusted_length % ep.max_packet_size != 0)
@@ -186,15 +202,11 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
         }
     }
 
-    // 如果请求很大（例如 64KB），一次性分配可能会导致内存不足。
-    // 对于 IN（设备->主机）传输，我们按小块（CHUNK_SIZE）同步读取并合并结果，
-    // 避免一次性分配过大的缓冲区导致 std::bad_alloc。
-    const std::size_t CHUNK_SIZE = 32 * 1024; // 8KB
-    if (!is_out && transfer_buffer_length > CHUNK_SIZE)
+    // 如果传输请求大于单次最大值，则仍然尽量异步并行提交多个 transfer，
+    // 但此路径应当很少触发——最好通过 menuconfig 将 MAX_TRANSFER_SIZE 提高到 32K/64K/128K。
+    if (!is_out && transfer_buffer_length > MAX_TRANSFER_SIZE)
     {
-        // ESP_LOGI(TAG, "大请求走分片路径: seqnum=%u, total_len=%u, CHUNK_SIZE=%u, heap=%d",seqnum, transfer_buffer_length, CHUNK_SIZE, esp_get_free_heap_size());
-        //  heap_caps_print_heap_info(MALLOC_CAP_DEFAULT);
-
+        SPDLOG_WARN("请求长度 %u 超过 MAX_TRANSFER_SIZE=%u，将并行拆分", transfer_buffer_length, MAX_TRANSFER_SIZE);
         size_t remaining = transfer_buffer_length;
         auto aggregated = std::make_shared<data_type>();
         try
@@ -206,46 +218,103 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
             SPDLOG_ERROR("无法为aggregated分配内存, size=%u, heap=%d", transfer_buffer_length, esp_get_free_heap_size());
             session.load()->submit_ret_submit(
                 UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
+            concurrent_transfer_count--;
             return;
         }
-        size_t write_offset = 0;
-        usb_transfer_status_t last_status = USB_TRANSFER_STATUS_COMPLETED;
 
-        while (remaining > 0)
+        struct ChunkContext
         {
-            size_t this_chunk = std::min<std::size_t>(CHUNK_SIZE, remaining);
-            // 对齐到max_packet_size（如果有）
-            if (ep.max_packet_size > 0 && this_chunk % ep.max_packet_size != 0)
+            Esp32DeviceHandler *handler;
+            std::shared_ptr<data_type> agg;
+            size_t offset;
+            size_t length;
+            std::atomic<size_t> *completed;
+            std::atomic<usb_transfer_status_t> *last_status;
+            uint32_t seqnum;
+            size_t total_chunks;
+            size_t original_length;
+        };
+
+        size_t total_chunks = (transfer_buffer_length + MAX_TRANSFER_SIZE - 1) / MAX_TRANSFER_SIZE;
+        auto completed = std::make_shared<std::atomic<size_t>>(0);
+        auto last_status = std::make_shared<std::atomic<usb_transfer_status_t>>(USB_TRANSFER_STATUS_COMPLETED);
+
+        size_t offset = 0;
+        for (size_t i = 0; i < total_chunks; ++i)
+        {
+            size_t this_len = std::min<size_t>(MAX_TRANSFER_SIZE, remaining);
+            size_t submit_len = this_len;
+            if (ep.max_packet_size > 0 && submit_len % ep.max_packet_size != 0)
             {
-                this_chunk = ((this_chunk + ep.max_packet_size - 1) / ep.max_packet_size) * ep.max_packet_size;
+                submit_len = ((submit_len + ep.max_packet_size - 1) / ep.max_packet_size) * ep.max_packet_size;
             }
 
             usb_transfer_t *chunk_tr = nullptr;
-            esp_err_t aerr = usb_host_transfer_alloc(this_chunk, 0, &chunk_tr);
+            esp_err_t aerr = usb_host_transfer_alloc(submit_len, 0, &chunk_tr);
             if (aerr != ESP_OK)
             {
-                SPDLOG_ERROR("无法申请chunk transfer: %s, 尝试大小: %u, heap=%d", esp_err_to_name(aerr), (unsigned)this_chunk, esp_get_free_heap_size());
-                heap_caps_print_heap_info(MALLOC_CAP_DEFAULT);
-                // 内存分配失败，返回错误给客户端
+                SPDLOG_ERROR("chunk transfer alloc 失败: %s", esp_err_to_name(aerr));
                 session.load()->submit_ret_submit(
                     UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
+                concurrent_transfer_count--;
                 return;
             }
 
-            std::binary_semaphore sem{0};
+            auto ctx = new ChunkContext{this, aggregated, offset, this_len, completed.get(), last_status.get(), seqnum, total_chunks, transfer_buffer_length};
+
             chunk_tr->device_handle = native_handle;
             chunk_tr->callback = [](usb_transfer_t *trx)
             {
-                std::binary_semaphore &sem = *static_cast<std::binary_semaphore *>(trx->context);
-                sem.release();
+                auto ctx = static_cast<ChunkContext *>(trx->context);
+                if (trx->status == USB_TRANSFER_STATUS_COMPLETED)
+                {
+                    size_t actual = static_cast<size_t>(trx->actual_num_bytes);
+                    size_t to_copy = std::min(actual, ctx->length);
+                    memcpy(ctx->agg->data() + ctx->offset, trx->data_buffer, to_copy);
+                }
+                else
+                {
+                    ctx->last_status->store(trx->status);
+                }
+
+                if (ctx->completed->fetch_add(1) + 1 == ctx->total_chunks)
+                {
+                    // 最后一个chunk完成，发送响应并减少并发计数
+                    if (ctx->last_status->load() == USB_TRANSFER_STATUS_COMPLETED)
+                    {
+                        ctx->agg->resize(ctx->original_length);
+                        ctx->handler->session.load()->submit_ret_submit(
+                            UsbIpResponse::UsbIpRetSubmit::create_ret_submit(
+                                ctx->seqnum,
+                                static_cast<uint32_t>(UrbStatusType::StatusOK),
+                                0,
+                                0,
+                                ctx->agg,
+                                {}));
+                    }
+                    else
+                    {
+                        ctx->handler->session.load()->submit_ret_submit(
+                            UsbIpResponse::UsbIpRetSubmit::create_ret_submit(
+                                ctx->seqnum,
+                                trxstat2error(ctx->last_status->load()),
+                                0,
+                                0,
+                                ctx->agg,
+                                {}));
+                    }
+                    ctx->handler->concurrent_transfer_count--;
+                }
+                usb_host_transfer_free(trx);
+                delete ctx;
             };
-            chunk_tr->context = &sem;
+            chunk_tr->context = ctx;
             chunk_tr->bEndpointAddress = ep.address;
-            chunk_tr->num_bytes = static_cast<int>(this_chunk);
+            chunk_tr->num_bytes = submit_len;
             chunk_tr->flags = get_esp32_transfer_flags(transfer_flags);
 
             {
-                std::shared_lock lock(endpoint_cancellation_mutex);
+                std::lock_guard lock(endpoint_cancellation_mutex);
                 aerr = usb_host_transfer_submit(chunk_tr);
             }
             if (aerr != ESP_OK)
@@ -254,63 +323,13 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
                 usb_host_transfer_free(chunk_tr);
                 session.load()->submit_ret_submit(
                     UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
+                concurrent_transfer_count--;
                 return;
             }
 
-            // 等待本次chunk完成
-            sem.acquire();
-
-            // 处理状态
-            if (chunk_tr->status == USB_TRANSFER_STATUS_COMPLETED)
-            {
-                size_t actual = static_cast<size_t>(chunk_tr->actual_num_bytes);
-                if (actual > 0)
-                {
-                    size_t to_copy = std::min(actual, remaining);
-                    memcpy(aggregated->data() + write_offset, chunk_tr->data_buffer, to_copy);
-                    write_offset += to_copy;
-                    remaining -= to_copy;
-                }
-                else
-                {
-                    // 短包或没有数据，结束读取
-                    remaining = 0;
-                }
-            }
-            else
-            {
-                last_status = chunk_tr->status;
-                // 发生错误，返回当前错误状态
-                usb_host_transfer_free(chunk_tr);
-                session.load()->submit_ret_submit(
-                    UsbIpResponse::UsbIpRetSubmit::create_ret_submit(
-                        seqnum,
-                        trxstat2error(last_status),
-                        0,
-                        0,
-                        aggregated,
-                        {}));
-                return;
-            }
-
-            usb_host_transfer_free(chunk_tr);
-
-            // 如果收到的实际字节少于请求的chunk大小，说明设备发送短包，结束读取
-            if (chunk_tr->actual_num_bytes < static_cast<int>(this_chunk))
-            {
-                break;
-            }
+            offset += this_len;
+            remaining -= this_len;
         }
-
-        // 所有chunk读取完成，发送一次合并的响应
-        session.load()->submit_ret_submit(
-            UsbIpResponse::UsbIpRetSubmit::create_ret_submit(
-                seqnum,
-                static_cast<std::uint32_t>(UrbStatusType::StatusOK),
-                0,
-                0,
-                aggregated,
-                {}));
         return;
     }
     usb_transfer_t *transfer = nullptr;
