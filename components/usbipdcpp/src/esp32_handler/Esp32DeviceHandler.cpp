@@ -778,22 +778,22 @@ bool usbipdcpp::Esp32DeviceHandler::tweak_special_requests(const SetupPacket &se
             return false;
         }
     }
+    /*
+        // 检查是否是类特定请求（U盘大容量存储类）
+        if ((setup_packet.request_type & 0x60) == 0x20)
+        { // 类特定请求
+            SPDLOG_DEBUG("类特定请求");
+            // 对于U盘，类特定请求应该由标准控制传输处理
+            return false;
+        }
 
-    // 检查是否是类特定请求（U盘大容量存储类）
-    if ((setup_packet.request_type & 0x60) == 0x20)
-    { // 类特定请求
-        SPDLOG_DEBUG("类特定请求");
-        // 对于U盘，类特定请求应该由标准控制传输处理
-        return false;
-    }
-
-    // 检查是否是供应商特定请求
-    if ((setup_packet.request_type & 0x60) == 0x40)
-    { // 供应商特定请求
-        SPDLOG_DEBUG("供应商特定请求");
-        return false;
-    }
-
+        // 检查是否是供应商特定请求
+        if ((setup_packet.request_type & 0x60) == 0x40)
+        { // 供应商特定请求
+            SPDLOG_DEBUG("供应商特定请求");
+            return false;
+        }
+    */
     SPDLOG_DEBUG("不需要调整包");
     return false;
 }

@@ -75,7 +75,4 @@ CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 #   Set this to 16384/32768/65536 depending on available RAM.
 CONFIG_USB_HOST_BULK_TRANSFER_MAX_SIZE=65536
 
-# 限制同时存在的 USB bulk 传输数量, 减少堆占用
-# 设置较小的值（例如 16、32）可以在负载高时快速拒绝请求而不是
-# 持续排队，从而避免内存爆炸。
 CONFIG_USBIP_MAX_CONCURRENT_TRANSFERS=32
