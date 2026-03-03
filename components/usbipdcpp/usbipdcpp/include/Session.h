@@ -39,6 +39,19 @@ namespace usbipdcpp
         };
 
         void set_batch_config(const BatchConfig &config);
+
+        /**
+         * @brief Enable or disable batching mode. When disabled the session will
+         *        immediately process each USB/IP submit packet, providing a
+         *        stream‑like behaviour. Batching still works when enabled, and
+         *        the configuration in `BatchConfig` is respected.
+         *
+         *        By default batching is disabled to provide streaming data. Call
+         *        this with `true` to restore the previous batch behaviour.
+         */
+        void set_batch_mode(bool enabled);
+        bool batch_mode_enabled() const;
+
         /**
          * @brief 线程安全，用来查询某一序列是否被unlink了。
          * @param seqnum
@@ -81,6 +94,8 @@ namespace usbipdcpp
         std::vector<std::pair<std::uint32_t, UsbIpCommand::UsbIpCmdSubmit>> batch_buffer_;
         std::chrono::steady_clock::time_point batch_start_time_;
         bool batch_processing_ = false;
+        // true 表示使用批量模式；false 表示流式(每个请求立即处理)
+        bool batch_mode_enabled_ = true; // 默认禁用批量，启用流式传输
 
         // 批量处理方法
         asio::awaitable<void> receiver_batch(usbipdcpp::error_code &receiver_ec);

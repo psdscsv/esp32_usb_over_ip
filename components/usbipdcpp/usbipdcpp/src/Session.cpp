@@ -16,6 +16,9 @@
 usbipdcpp::Session::Session(Server &server) : server(server),
                                               socket(session_io_context)
 {
+    // 默认情况下禁用批量处理，以便实现流式传输。客户端如果需要可以通过
+    // set_batch_mode(true)重新开启。
+    batch_mode_enabled_ = false;
 }
 void usbipdcpp::Session::set_batch_config(const BatchConfig &config)
 {
@@ -23,6 +26,17 @@ void usbipdcpp::Session::set_batch_config(const BatchConfig &config)
     SPDLOG_INFO("批量配置: 最大批量={}, 最大字节={}, 最大延迟={}ms",
                 config.max_batch_size, config.max_batch_bytes,
                 config.max_batch_delay.count());
+}
+
+void usbipdcpp::Session::set_batch_mode(bool enabled)
+{
+    batch_mode_enabled_ = enabled;
+    SPDLOG_INFO("batch mode {}", enabled ? "enabled" : "disabled");
+}
+
+bool usbipdcpp::Session::batch_mode_enabled() const
+{
+    return batch_mode_enabled_;
 }
 
 std::tuple<bool, std::uint32_t> usbipdcpp::Session::get_unlink_seqnum(std::uint32_t seqnum)
@@ -450,16 +464,14 @@ asio::awaitable<void> usbipdcpp::Session::transfer_loop(usbipdcpp::error_code &t
 }
 asio::awaitable<void> usbipdcpp::Session::receiver(usbipdcpp::error_code &receiver_ec)
 {
-    // 检查是否启用批量模式
-    static bool enable_batch_mode = true; // 可以改为配置项
-
-    if (enable_batch_mode)
+    // 根据成员变量决定使用哪种处理方式。
+    if (batch_mode_enabled_)
     {
         co_await receiver_batch(receiver_ec);
     }
     else
     {
-        // 使用原始的单命令处理模式
+        // 流式模式：每个命令到达就立即处理
         co_await receiver_single(receiver_ec);
     }
 }

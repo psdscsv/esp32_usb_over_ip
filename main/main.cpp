@@ -154,12 +154,12 @@ void setup()
         led_set_all(led_handle, 0, 0, 32);
     }
 }
-
 // C入口函数
 extern "C" void app_main(void)
 {
     vTaskDelay(pdMS_TO_TICKS(2000));
     setup();
+
     // 创建服务器实例
     UsbipServer server;
 

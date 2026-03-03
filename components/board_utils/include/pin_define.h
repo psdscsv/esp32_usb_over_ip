@@ -8,7 +8,7 @@ Default log verbosity
 */
 #define ENABLE_PIN 1
 // LED引脚定义
-#define LED_PIN 2
+#define LED_PIN 1
 // 摄像头引脚定义
 #define CAM_PWDN_GPIO_NUM -1
 #define CAM_RESET_GPIO_NUM -1
