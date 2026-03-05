@@ -12,10 +12,9 @@
 #include "DeviceHandler/DeviceHandler.h"
 #include "SetupPacket.h"
 #include "esp32_handler/tools.h"
-
+#include "esp_timer.h"
 // 前向声明
 struct usb_transfer;
-
 namespace usbipdcpp
 {
     class Esp32DeviceHandler : public DeviceHandlerBase
@@ -97,6 +96,9 @@ namespace usbipdcpp
             bool is_out;
             std::uint32_t original_transfer_buffer_length;
             bool counted_in_concurrent = false;
+
+            uint64_t recv_time;   // 收到网络请求的时间
+            uint64_t submit_time; // USB传输提交的时间
         };
 
         static void transfer_callback(usb_transfer_t *trx);
@@ -110,7 +112,7 @@ namespace usbipdcpp
         usb_device_info_t device_info{};
         usb_host_client_handle_t host_client_handle;
 
-        std::atomic_bool all_transfer_should_stop = false;
+        std::atomic_bool all_transfer_should_stop = true;
         std::atomic_bool has_device = true;
 
     private:

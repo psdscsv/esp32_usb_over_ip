@@ -164,7 +164,6 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
         ec = make_error_code(ErrorType::NO_DEVICE);
         return;
     }
-
     check_and_clean_memory();
 
     // 检查并发传输数，如果达到上限则立即返回 EPIPE 给客户端。
@@ -348,7 +347,9 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
         .transfer_type = USB_TRANSFER_TYPE_BULK,
         .is_out = is_out,
         .original_transfer_buffer_length = transfer_buffer_length,
-        .counted_in_concurrent = true};
+        .counted_in_concurrent = true,
+        .recv_time = (uint64_t)esp_timer_get_time(),
+        .submit_time = 0};
 
     if (!callback_args)
     {
@@ -381,7 +382,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
         std::lock_guard lock(transferring_data_mutex);
         transferring_data[seqnum] = transfer;
     }
-
+    callback_args->submit_time = esp_timer_get_time();
     err = usb_host_transfer_submit(transfer);
     if (err != ESP_OK)
     {
@@ -855,6 +856,7 @@ usb_transfer_status_t usbipdcpp::Esp32DeviceHandler::error2trxstat(int e)
 }
 void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
 {
+
     auto callback_arg_ptr = static_cast<esp32_callback_args *>(trx->context);
     if (!callback_arg_ptr)
     {
@@ -863,7 +865,25 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
     }
 
     auto &callback_arg = *callback_arg_ptr;
+    uint64_t t_now = esp_timer_get_time();
 
+    // 计算延迟（仅对批量传输且非拆分情况）
+    if (callback_arg.transfer_type == USB_TRANSFER_TYPE_BULK && callback_arg.counted_in_concurrent)
+    {
+        uint64_t recv2submit = callback_arg.submit_time - callback_arg.recv_time;
+        uint64_t submit2usb = t_now - callback_arg.submit_time;
+        uint64_t total = t_now - callback_arg.recv_time;
+
+        // 每 10 次打印一次，避免日志过多
+        static uint32_t counter = 0;
+        if (++counter % 10 == 0)
+        {
+            ESP_LOGI("USBIP_PERF",
+                     "BULK seq=%u, len=%u, recv2submit=%llu us, submit2usb=%llu us, total=%llu us",
+                     callback_arg.seqnum, callback_arg.original_transfer_buffer_length,
+                     recv2submit, submit2usb, total);
+        }
+    }
     callback_arg.handler.total_transfer_count++;
 
     if (callback_arg.handler.all_transfer_should_stop)

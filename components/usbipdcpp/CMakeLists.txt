@@ -17,7 +17,7 @@ set(USBIPDCPP_ALL_SRC_FILES ${USBIPDCPP_ORIGIN_SRC_FILES} ${USBIPDCPP_ESP32_HAND
 
 idf_component_register(SRCS ${USBIPDCPP_ALL_SRC_FILES}
         INCLUDE_DIRS ${usbipdcpp_DIR}/include include 
-        REQUIRES asio lwip sock_utils spdlog usb pthread)
+        REQUIRES asio lwip sock_utils spdlog usb pthread esp_timer)
 
 add_compile_definitions(
         #        SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE

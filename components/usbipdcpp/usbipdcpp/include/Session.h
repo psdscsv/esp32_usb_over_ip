@@ -95,7 +95,7 @@ namespace usbipdcpp
         std::chrono::steady_clock::time_point batch_start_time_;
         bool batch_processing_ = false;
         // true 表示使用批量模式；false 表示流式(每个请求立即处理)
-        bool batch_mode_enabled_ = true; // 默认禁用批量，启用流式传输
+        bool batch_mode_enabled_ = false; // 默认禁用批量，启用流式传输
 
         // 批量处理方法
         asio::awaitable<void> receiver_batch(usbipdcpp::error_code &receiver_ec);
