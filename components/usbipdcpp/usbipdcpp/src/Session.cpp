@@ -18,7 +18,7 @@ usbipdcpp::Session::Session(Server &server) : server(server),
 {
     // 默认情况下禁用批量处理，以便实现流式传输。客户端如果需要可以通过
     // set_batch_mode(true)重新开启。
-    batch_mode_enabled_ = false;
+    batch_mode_enabled_ = true;
 }
 void usbipdcpp::Session::set_batch_config(const BatchConfig &config)
 {
@@ -572,7 +572,12 @@ asio::awaitable<void> usbipdcpp::Session::receiver_single(usbipdcpp::error_code 
                 else if constexpr (std::is_same_v<UsbIpCommand::UsbIpCmdUnlink, T>) {
                     UsbIpCommand::UsbIpCmdUnlink &cmd2 = cmd;
                     SPDLOG_TRACE("收到 UsbIpCmdUnlink 包，序列号: {}", cmd2.header.seqnum);
-
+    // 记录接收时间戳
+    int64_t recv_time = esp_timer_get_time();
+    {
+        std::unique_lock lock(timestamps_mutex_);
+        recv_timestamps_[cmd2.header.seqnum] = recv_time;
+    }
                     {
                         std::lock_guard lock(unlink_map_mutex);
                         unlink_map.emplace(cmd2.unlink_seqnum, cmd2.header.seqnum);
@@ -605,6 +610,7 @@ asio::awaitable<void> usbipdcpp::Session::receiver_single(usbipdcpp::error_code 
     current_import_device.reset();
     SPDLOG_TRACE("将当前导入设备的busid设为空");
 }
+
 asio::awaitable<void> usbipdcpp::Session::sender(usbipdcpp::error_code &ec)
 {
     while (!should_immediately_stop)
@@ -626,20 +632,78 @@ asio::awaitable<void> usbipdcpp::Session::sender(usbipdcpp::error_code &ec)
                             {
             using T = std::remove_cvref_t<decltype(cmd)>;
             if constexpr (std::is_same_v<UsbIpResponse::UsbIpRetSubmit, T>) {
-                // 零拷贝发送 - cmd 会一直存活直到 co_await 完成
+                uint32_t seqnum = cmd.header.seqnum;
+                
+                // 记录发送开始时间
+                int64_t send_start_time = esp_timer_get_time();
+                
+                // 零拷贝发送
                 co_await cmd.to_socket_co(socket, sending_ec);
-                if (sending_ec) {
-                    SPDLOG_ERROR("写入 socket 时出错 submit seq={} : {}", cmd.header.seqnum, sending_ec.message());
+                
+                if (!sending_ec) {
+                    int64_t send_complete_time = esp_timer_get_time();
+                    int64_t send_duration = send_complete_time - send_start_time;
+                    
+                    // 获取接收时间戳
+                    int64_t recv_time = 0;
+                    {
+                        std::shared_lock lock(timestamps_mutex_);
+                        auto it = recv_timestamps_.find(seqnum);
+                        if (it != recv_timestamps_.end()) {
+                            recv_time = it->second;
+                        }
+                    }
+                    
+                    if (recv_time != 0) {
+                        int64_t total_latency_us = send_complete_time - recv_time;
+                        
+                        // 记录详细的时间信息
+                        ESP_LOGI("NET_PERF", 
+                                "Request seq=%u | 接收->处理完成: %lld us | 网络发送: %lld us | 总延迟: %lld us",
+                                seqnum, 
+                                send_start_time - recv_time,  // 从接收到开始发送的时间
+                                send_duration,                 // 实际网络发送耗时
+                                total_latency_us);             // 总延迟
+                        
+                        // 更新统计信息
+                        total_latency_us_ += total_latency_us;
+                        request_count_++;
+                        
+                        // 每100个请求输出一次平均延迟
+                        if (request_count_ % 100 == 0) {
+                            double avg_latency = static_cast<double>(total_latency_us_) / request_count_;
+                            ESP_LOGI("NET_PERF_AVG", 
+                                    "Average latency for last %u requests: %.2f us (%.2f ms)",
+                                    request_count_.load(), avg_latency, avg_latency / 1000.0);
+                        }
+                        
+                        // 清理已处理的条目
+                        {
+                            std::unique_lock lock(timestamps_mutex_);
+                            recv_timestamps_.erase(seqnum);
+                        }
+                    }
+                    
+                    ESP_LOGI("NET_PERF", "成功写入socket submit seq=%d, 发送耗时=%dus", 
+                                seqnum, send_duration);
                 } else {
-                    SPDLOG_DEBUG("成功写入 socket submit seq={}", cmd.header.seqnum);
+                    SPDLOG_ERROR("写入socket时出错 submit seq={} : {}", 
+                                seqnum, sending_ec.message());
                 }
             }
             else if constexpr (std::is_same_v<UsbIpResponse::UsbIpRetUnlink, T>) {
+                uint32_t seqnum = cmd.header.seqnum;
+                int64_t send_start = esp_timer_get_time();
+                
                 co_await cmd.to_socket_co(socket, sending_ec);
-                if (sending_ec) {
-                    SPDLOG_ERROR("写入 socket 时出错 unlink seq={} : {}", cmd.header.seqnum, sending_ec.message());
+                
+                if (!sending_ec) {
+                    int64_t send_duration = esp_timer_get_time() - send_start;
+                    ESP_LOGI("NET_PERF", "成功写入socket unlink seq=%d, 发送耗时=%dus", 
+                                seqnum, send_duration);
                 } else {
-                    SPDLOG_DEBUG("成功写入 socket unlink seq={}", cmd.header.seqnum);
+                    SPDLOG_ERROR("写入socket时出错 unlink seq={} : {}", 
+                                seqnum, sending_ec.message());
                 }
             }
             else if constexpr (std::is_same_v<std::monostate, T>) {
@@ -658,7 +722,8 @@ asio::awaitable<void> usbipdcpp::Session::sender(usbipdcpp::error_code &ec)
         }
     }
 
-    if (ec == asio::experimental::error::channel_closed || ec == asio::experimental::error::channel_cancelled)
+    if (ec == asio::experimental::error::channel_closed ||
+        ec == asio::experimental::error::channel_cancelled)
     {
         SPDLOG_DEBUG("sender ec:{}", ec.message());
         ec.clear();

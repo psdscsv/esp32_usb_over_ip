@@ -10,10 +10,11 @@
 #include <asio/ip/tcp.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/experimental/channel.hpp>
-
+#include <unordered_map>
+#include <shared_mutex>
 #include "protocol.h"
 #include "type.h"
-
+#include "esp_timer.h"
 namespace usbipdcpp
 {
     class Server;
@@ -93,6 +94,12 @@ namespace usbipdcpp
         BatchConfig batch_config_;
         std::vector<std::pair<std::uint32_t, UsbIpCommand::UsbIpCmdSubmit>> batch_buffer_;
         std::chrono::steady_clock::time_point batch_start_time_;
+
+        std::unordered_map<std::uint32_t, int64_t> recv_timestamps_; // seqnum -> 接收时间 (us)
+        std::shared_mutex timestamps_mutex_;
+        std::atomic<uint64_t> total_latency_us_{0}; // 累积总延迟
+        std::atomic<uint32_t> request_count_{0};
+
         bool batch_processing_ = false;
         // true 表示使用批量模式；false 表示流式(每个请求立即处理)
         bool batch_mode_enabled_ = false; // 默认禁用批量，启用流式传输
