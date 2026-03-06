@@ -684,8 +684,6 @@ asio::awaitable<void> usbipdcpp::Session::sender(usbipdcpp::error_code &ec)
                         }
                     }
                     
-                    ESP_LOGI("NET_PERF", "成功写入socket submit seq=%d, 发送耗时=%dus", 
-                                seqnum, send_duration);
                 } else {
                     SPDLOG_ERROR("写入socket时出错 submit seq={} : {}", 
                                 seqnum, sending_ec.message());
@@ -698,9 +696,7 @@ asio::awaitable<void> usbipdcpp::Session::sender(usbipdcpp::error_code &ec)
                 co_await cmd.to_socket_co(socket, sending_ec);
                 
                 if (!sending_ec) {
-                    int64_t send_duration = esp_timer_get_time() - send_start;
-                    ESP_LOGI("NET_PERF", "成功写入socket unlink seq=%d, 发送耗时=%dus", 
-                                seqnum, send_duration);
+                    int64_t send_duration = esp_timer_get_time() - send_start;                         
                 } else {
                     SPDLOG_ERROR("写入socket时出错 unlink seq={} : {}", 
                                 seqnum, sending_ec.message());

@@ -12,9 +12,9 @@
 #include "DeviceHandler/DeviceHandler.h"
 #include "SetupPacket.h"
 #include "esp32_handler/tools.h"
+#include "esp32_handler/ConcurrentTransferTracker.h"
 #include "esp_timer.h"
-// 前向声明
-struct usb_transfer;
+
 namespace usbipdcpp
 {
     class Esp32DeviceHandler : public DeviceHandlerBase
@@ -105,8 +105,8 @@ namespace usbipdcpp
 
         static const char *TAG;
 
-        std::map<std::uint32_t, usb_transfer_t *> transferring_data;
-        std::shared_mutex transferring_data_mutex;
+        // 优化：使用分段锁追踪器替代大锁
+        ConcurrentTransferTracker transfer_tracker_;
 
         usb_device_handle_t native_handle;
         usb_device_info_t device_info{};

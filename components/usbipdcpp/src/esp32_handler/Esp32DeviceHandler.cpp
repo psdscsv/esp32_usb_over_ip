@@ -38,8 +38,7 @@ void usbipdcpp::Esp32DeviceHandler::on_disconnection(error_code &ec)
     }
     cancel_all_transfer();
     spdlog::info("成功取消所有传输");
-    transferring_data.clear();
-    concurrent_transfer_count = 0;
+    transfer_tracker_.clear();
     session = nullptr;
 }
 
@@ -124,19 +123,21 @@ void usbipdcpp::Esp32DeviceHandler::handle_control_urb(
     transfer->num_bytes = USB_SETUP_PACKET_SIZE + setup_packet.length;
     transfer->flags = get_esp32_transfer_flags(transfer_flags);
 
+    if (!transfer_tracker_.register_transfer(seqnum, transfer, ep.address))
     {
-        std::lock_guard lock(transferring_data_mutex);
-        transferring_data[seqnum] = transfer;
+        SPDLOG_ERROR("无法注册转移，并发数超过限制");
+        usb_host_transfer_free(transfer);
+        delete callback_args;
+        session.load()->submit_ret_submit(
+            UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
+        return;
     }
 
     err = usb_host_transfer_submit_control(host_client_handle, transfer);
     if (err != ESP_OK)
     {
         SPDLOG_ERROR("transfer提交失败: %s", esp_err_to_name(err));
-        {
-            std::lock_guard lock(transferring_data_mutex);
-            transferring_data.erase(seqnum);
-        }
+        transfer_tracker_.remove(seqnum);
         usb_host_transfer_free(transfer);
         delete callback_args;
 
@@ -166,18 +167,8 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
     }
     check_and_clean_memory();
 
-    // 检查并发传输数，如果达到上限则立即返回 EPIPE 给客户端。
-    // 也可以在此处将请求排队再处理，但为避免无限制堆积导致内存炸裂，
-    // 默认选择快速拒绝并由上层重试。
-    if (concurrent_transfer_count >= MAX_CONCURRENT_TRANSFERS)
-    {
-        ESP_LOGW(TAG, "并发传输数达到限制(%zu)，返回EPIPE", static_cast<size_t>(MAX_CONCURRENT_TRANSFERS));
-        session.load()->submit_ret_submit(
-            UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
-        return;
-    }
-
-    concurrent_transfer_count++;
+    // 使用优化的transfer_tracker_管理并发
+    // transfer_tracker_内部自动跟踪并发数，无需手动递增/递减
     bool is_out = !ep.is_in();
 
     // 最大内部传输长度由 SDK 配置项决定，可在 menuconfig 中调整
@@ -185,7 +176,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
 #ifdef CONFIG_USB_HOST_BULK_TRANSFER_MAX_SIZE
     constexpr uint32_t MAX_TRANSFER_SIZE = CONFIG_USB_HOST_BULK_TRANSFER_MAX_SIZE;
 #else
-    constexpr uint32_t MAX_TRANSFER_SIZE = 64 * 1024;
+    constexpr uint32_t MAX_TRANSFER_SIZE = 1024;
 #endif
 
     // 请求长度不超过允许的最大值时直接异步提交一个 transfer
@@ -378,19 +369,22 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
         transfer->flags &= USB_TRANSFER_FLAG_ZERO_PACK;
     }
 
+    if (!transfer_tracker_.register_transfer(seqnum, transfer, ep.address))
     {
-        std::lock_guard lock(transferring_data_mutex);
-        transferring_data[seqnum] = transfer;
+        SPDLOG_ERROR("无法注册转移，并发数超过限制");
+        usb_host_transfer_free(transfer);
+        delete callback_args;
+        session.load()->submit_ret_submit(
+            UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
+        return;
     }
+
     callback_args->submit_time = esp_timer_get_time();
     err = usb_host_transfer_submit(transfer);
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "transfer提交失败: %s", esp_err_to_name(err));
-        {
-            std::lock_guard lock(transferring_data_mutex);
-            transferring_data.erase(seqnum);
-        }
+        transfer_tracker_.remove(seqnum);
         usb_host_transfer_free(transfer);
         delete callback_args;
         concurrent_transfer_count--;
@@ -416,19 +410,8 @@ void usbipdcpp::Esp32DeviceHandler::check_and_clean_memory()
             ESP_LOGW(TAG, "内存不足，强制清理");
             cancel_all_transfer();
 
-            // 清理transferring_data
-            {
-                std::lock_guard lock(transferring_data_mutex);
-                for (auto &[seqnum, transfer] : transferring_data)
-                {
-                    if (transfer)
-                    {
-                        usb_host_transfer_free(transfer);
-                    }
-                }
-                transferring_data.clear();
-                concurrent_transfer_count = 0;
-            }
+            // 清理所有当前的转移
+            transfer_tracker_.clear();
 
             // 强制垃圾回收
             // heap_caps_print_heap_info(MALLOC_CAP_DEFAULT);
@@ -491,9 +474,12 @@ void usbipdcpp::Esp32DeviceHandler::handle_interrupt_transfer(std::uint32_t seqn
         transfer->num_bytes = adjusted_length; // 使用调整后的长度
         transfer->flags = get_esp32_transfer_flags(transfer_flags);
 
+        if (!transfer_tracker_.register_transfer(seqnum, transfer, ep.address))
         {
-            std::lock_guard lock(transferring_data_mutex);
-            transferring_data[seqnum] = transfer;
+            SPDLOG_ERROR("无法注册转移，并发数超过限制");
+            usb_host_transfer_free(transfer);
+            delete callback_args;
+            goto error_occurred;
         }
 
         err = usb_host_transfer_submit(transfer);
@@ -501,6 +487,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_interrupt_transfer(std::uint32_t seqn
         if (err != ESP_OK)
         {
             SPDLOG_ERROR("transfer提交失败");
+            transfer_tracker_.remove(seqnum);
             usb_host_transfer_free(transfer);
             delete callback_args;
             goto error_occurred;
@@ -574,15 +561,19 @@ void usbipdcpp::Esp32DeviceHandler::handle_isochronous_transfer(
 
         transfer->flags = get_esp32_transfer_flags(transfer_flags);
 
+        if (!transfer_tracker_.register_transfer(seqnum, transfer, ep.address))
         {
-            std::lock_guard lock(transferring_data_mutex);
-            transferring_data[seqnum] = transfer;
+            SPDLOG_ERROR("无法注册转移，并发数超过限制");
+            usb_host_transfer_free(transfer);
+            delete callback_args;
+            goto error_occurred;
         }
 
         err = usb_host_transfer_submit(transfer);
         if (err < 0)
         {
             SPDLOG_ERROR("transfer提交失败");
+            transfer_tracker_.remove(seqnum);
             usb_host_transfer_free(transfer);
             delete callback_args;
             goto error_occurred;
@@ -893,10 +884,8 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
         return;
     }
 
-    {
-        std::lock_guard lock(callback_arg.handler.transferring_data_mutex);
-        callback_arg.handler.transferring_data.erase(callback_arg.seqnum);
-    }
+    // 从追踪器中移除转移
+    callback_arg.handler.transfer_tracker_.remove(callback_arg.seqnum);
 
     auto unlink_found = callback_arg.handler.session.load()->get_unlink_seqnum(callback_arg.seqnum);
     bool should_send_response = true;
@@ -968,11 +957,11 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
         {
             callback_arg.handler.zero_copy_count++;
 
-            SPDLOG_TRACE("零拷贝响应: seq={}, 实际长度={}, 偏移={}, 总计零拷贝={}",
-                         callback_arg.seqnum,
-                         trx->actual_num_bytes - data_offset,
-                         data_offset,
-                         callback_arg.handler.zero_copy_count.load());
+            ESP_LOGI(TAG, "零拷贝响应: seq=%d, 实际长度=%d, 偏移=%d, 总计零拷贝=%d",
+                     callback_arg.seqnum,
+                     trx->actual_num_bytes - data_offset,
+                     data_offset,
+                     callback_arg.handler.zero_copy_count.load());
 
             // 使用新的工厂函数创建零拷贝响应
             auto response = UsbIpResponse::UsbIpRetSubmit::create_ret_submit(
