@@ -8,7 +8,6 @@
 #include "SetupPacket.h"
 #include "constant.h"
 #include "endpoint.h"
-#include "protocol.h"
 const char *usbipdcpp::Esp32DeviceHandler::TAG = "Esp32DeviceHandler";
 
 usbipdcpp::Esp32DeviceHandler::Esp32DeviceHandler(UsbDevice &handle_device, usb_device_handle_t native_handle,
@@ -176,7 +175,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
 #ifdef CONFIG_USB_HOST_BULK_TRANSFER_MAX_SIZE
     constexpr uint32_t MAX_TRANSFER_SIZE = CONFIG_USB_HOST_BULK_TRANSFER_MAX_SIZE;
 #else
-    constexpr uint32_t MAX_TRANSFER_SIZE = 1024;
+    constexpr uint32_t MAX_TRANSFER_SIZE = 64 * 1024;
 #endif
 
     // 请求长度不超过允许的最大值时直接异步提交一个 transfer
@@ -196,7 +195,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
     // 但此路径应当很少触发——最好通过 menuconfig 将 MAX_TRANSFER_SIZE 提高到 32K/64K/128K。
     if (!is_out && transfer_buffer_length > MAX_TRANSFER_SIZE)
     {
-        SPDLOG_WARN("请求长度 %u 超过 MAX_TRANSFER_SIZE=%u，将并行拆分", transfer_buffer_length, MAX_TRANSFER_SIZE);
+        SPDLOG_WARN("请求长度 {} 超过 MAX_TRANSFER_SIZE={}，将并行拆分", transfer_buffer_length, MAX_TRANSFER_SIZE);
         size_t remaining = transfer_buffer_length;
         auto aggregated = std::make_shared<data_type>();
         try
@@ -208,7 +207,6 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
             SPDLOG_ERROR("无法为aggregated分配内存, size=%u, heap=%d", transfer_buffer_length, esp_get_free_heap_size());
             session.load()->submit_ret_submit(
                 UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
-            concurrent_transfer_count--;
             return;
         }
 
@@ -230,6 +228,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
         auto last_status = std::make_shared<std::atomic<usb_transfer_status_t>>(USB_TRANSFER_STATUS_COMPLETED);
 
         size_t offset = 0;
+        bool all_chunks_submitted_successfully = true;
         for (size_t i = 0; i < total_chunks; ++i)
         {
             size_t this_len = std::min<size_t>(MAX_TRANSFER_SIZE, remaining);
@@ -246,8 +245,8 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
                 SPDLOG_ERROR("chunk transfer alloc 失败: %s", esp_err_to_name(aerr));
                 session.load()->submit_ret_submit(
                     UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
-                concurrent_transfer_count--;
-                return;
+                all_chunks_submitted_successfully = false;
+                break;
             }
 
             auto ctx = new ChunkContext{this, aggregated, offset, this_len, completed.get(), last_status.get(), seqnum, total_chunks, transfer_buffer_length};
@@ -313,21 +312,27 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
                 usb_host_transfer_free(chunk_tr);
                 session.load()->submit_ret_submit(
                     UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
-                concurrent_transfer_count--;
-                return;
+                all_chunks_submitted_successfully = false;
+                break;
             }
 
             offset += this_len;
             remaining -= this_len;
         }
+
+        // 只有在所有chunks都成功提交后才增加计数
+        if (all_chunks_submitted_successfully)
+        {
+            concurrent_transfer_count++;
+        }
         return;
     }
+
     usb_transfer_t *transfer = nullptr;
     auto err = usb_host_transfer_alloc(adjusted_length, 0, &transfer);
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "无法申请transfer: %s, 大小: %u", esp_err_to_name(err), adjusted_length);
-        concurrent_transfer_count--;
         ec = make_error_code(ErrorType::TRANSFER_ERROR);
         return;
     }
@@ -346,7 +351,6 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
     {
         ESP_LOGE(TAG, "无法分配callback_args内存");
         usb_host_transfer_free(transfer);
-        concurrent_transfer_count--;
         ec = make_error_code(ErrorType::TRANSFER_ERROR);
         return;
     }
@@ -379,7 +383,9 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
         return;
     }
 
+    concurrent_transfer_count++;
     callback_args->submit_time = esp_timer_get_time();
+
     err = usb_host_transfer_submit(transfer);
     if (err != ESP_OK)
     {
@@ -867,7 +873,7 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
 
         // 每 10 次打印一次，避免日志过多
         static uint32_t counter = 0;
-        if (++counter % 10 == 0)
+        if (++counter % 100 == 0)
         {
             ESP_LOGI("USBIP_PERF",
                      "BULK seq=%u, len=%u, recv2submit=%llu us, submit2usb=%llu us, total=%llu us",
@@ -957,11 +963,11 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
         {
             callback_arg.handler.zero_copy_count++;
 
-            ESP_LOGI(TAG, "零拷贝响应: seq=%d, 实际长度=%d, 偏移=%d, 总计零拷贝=%d",
-                     callback_arg.seqnum,
-                     trx->actual_num_bytes - data_offset,
-                     data_offset,
-                     callback_arg.handler.zero_copy_count.load());
+            SPDLOG_TRACE("零拷贝响应: seq={}, 实际长度={}, 偏移={}, 总计零拷贝={}",
+                         callback_arg.seqnum,
+                         trx->actual_num_bytes - data_offset,
+                         data_offset,
+                         callback_arg.handler.zero_copy_count.load());
 
             // 使用新的工厂函数创建零拷贝响应
             auto response = UsbIpResponse::UsbIpRetSubmit::create_ret_submit(
