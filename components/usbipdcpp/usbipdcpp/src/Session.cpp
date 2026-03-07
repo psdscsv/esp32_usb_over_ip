@@ -18,7 +18,7 @@ usbipdcpp::Session::Session(Server &server) : server(server),
 {
     // 默认情况下禁用批量处理，以便实现流式传输。客户端如果需要可以通过
     // set_batch_mode(true)重新开启。
-    batch_mode_enabled_ = true;
+    batch_mode_enabled_ = false;
 }
 void usbipdcpp::Session::set_batch_config(const BatchConfig &config)
 {
