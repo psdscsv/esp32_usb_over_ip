@@ -7,6 +7,7 @@
 #include <esp_log.h>
 #include <esp_system.h>
 #include <esp_wifi.h>
+#include <esp_heap_caps.h>
 #include <usb/usb_host.h>
 #include <lwip/sys.h>
 #include <lwip/sockets.h>
@@ -167,7 +168,7 @@ void UsbipServer::thread_main()
     {
         // 定期打印状态信息
         static int loop_count = 0;
-        if (loop_count++ % 30 == 0)
+        if (loop_count++ % 1 == 0)
         {
             wifi_status_t status;
             wifi_get_status(&status);
@@ -181,7 +182,9 @@ void UsbipServer::thread_main()
                 ESP_LOGI(TAG, "System status: WiFi disconnected");
             }
 
-            ESP_LOGI(TAG, "Free heap: %d bytes", esp_get_free_heap_size());
+            uint32_t internal_free = esp_get_free_heap_size();
+            uint32_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+            ESP_LOGI(TAG, "Free heap: %d bytes (internal), PSRAM: %d bytes", internal_free, psram_free);
         }
 
         std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -195,6 +198,16 @@ void UsbipServer::start()
     ESP_LOGI(TAG, "Application start");
     ESP_LOGI(TAG, "Free heap: %d bytes", esp_get_free_heap_size());
     ESP_LOGI(TAG, "Minimum free heap: %d bytes", esp_get_minimum_free_heap_size());
+
+    // 检查PSRAM内存
+    uint32_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    uint32_t psram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+    ESP_LOGI(TAG, "PSRAM - Total: %d bytes, Free: %d bytes", psram_total, psram_free);
+
+    if (psram_total == 0)
+    {
+        ESP_LOGW(TAG, "WARNING: PSRAM not available! Check sdkconfig settings.");
+    }
 
     // 创建主线程
     main_worker_thread = std::thread([this]()

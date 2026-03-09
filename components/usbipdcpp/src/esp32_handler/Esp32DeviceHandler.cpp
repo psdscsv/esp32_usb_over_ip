@@ -154,11 +154,6 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
     const data_type &out_data,
     [[maybe_unused]] std::error_code &ec)
 {
-    // 本函数已优化为完全异步传输：
-    // - 对于可以一次发送的长度直接分配一个足够大的 transfer 并异步提交
-    // - 只有在请求超过 USB_HOST_BULK_TRANSFER_MAX_SIZE 时使用并行拆分
-    //   （该配置项可以通过 menuconfig 调整，推荐设置为 16K/32K/64K）
-    // 这样就不会在主线程中串行等待 chunk，USB 和网络可以流水线并行。
     if (!has_device)
     {
         ec = make_error_code(ErrorType::NO_DEVICE);
@@ -170,13 +165,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
     // transfer_tracker_内部自动跟踪并发数，无需手动递增/递减
     bool is_out = !ep.is_in();
 
-    // 最大内部传输长度由 SDK 配置项决定，可在 menuconfig 中调整
-    // CONFIG_USB_HOST_BULK_TRANSFER_MAX_SIZE 默认可能较小，此处为安全回退
-#ifdef CONFIG_USB_HOST_BULK_TRANSFER_MAX_SIZE
-    constexpr uint32_t MAX_TRANSFER_SIZE = CONFIG_USB_HOST_BULK_TRANSFER_MAX_SIZE;
-#else
     constexpr uint32_t MAX_TRANSFER_SIZE = 64 * 1024;
-#endif
 
     // 请求长度不超过允许的最大值时直接异步提交一个 transfer
     uint32_t adjusted_length = std::min(transfer_buffer_length, MAX_TRANSFER_SIZE);
@@ -197,7 +186,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
     {
         SPDLOG_WARN("请求长度 {} 超过 MAX_TRANSFER_SIZE={}，将并行拆分", transfer_buffer_length, MAX_TRANSFER_SIZE);
         size_t remaining = transfer_buffer_length;
-        auto aggregated = std::make_shared<data_type>();
+        auto aggregated = std::make_shared<psram_data_type>();
         try
         {
             aggregated->resize(transfer_buffer_length);
@@ -213,7 +202,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
         struct ChunkContext
         {
             Esp32DeviceHandler *handler;
-            std::shared_ptr<data_type> agg;
+            std::shared_ptr<psram_data_type> agg;
             size_t offset;
             size_t length;
             std::atomic<size_t> *completed;
@@ -272,24 +261,28 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
                     if (ctx->last_status->load() == USB_TRANSFER_STATUS_COMPLETED)
                     {
                         ctx->agg->resize(ctx->original_length);
+                        // 转换psram_data_type为data_type
+                        auto result = std::make_shared<data_type>(ctx->agg->begin(), ctx->agg->end());
                         ctx->handler->session.load()->submit_ret_submit(
                             UsbIpResponse::UsbIpRetSubmit::create_ret_submit(
                                 ctx->seqnum,
                                 static_cast<uint32_t>(UrbStatusType::StatusOK),
                                 0,
                                 0,
-                                ctx->agg,
+                                result,
                                 {}));
                     }
                     else
                     {
+                        // 转换psram_data_type为data_type
+                        auto result = std::make_shared<data_type>(ctx->agg->begin(), ctx->agg->end());
                         ctx->handler->session.load()->submit_ret_submit(
                             UsbIpResponse::UsbIpRetSubmit::create_ret_submit(
                                 ctx->seqnum,
                                 trxstat2error(ctx->last_status->load()),
                                 0,
                                 0,
-                                ctx->agg,
+                                result,
                                 {}));
                     }
                     ctx->handler->concurrent_transfer_count--;
@@ -370,7 +363,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
 
     if (is_out)
     {
-        transfer->flags &= USB_TRANSFER_FLAG_ZERO_PACK;
+        transfer->flags |= USB_TRANSFER_FLAG_ZERO_PACK;
     }
 
     if (!transfer_tracker_.register_transfer(seqnum, transfer, ep.address))
@@ -687,17 +680,23 @@ esp_err_t usbipdcpp::Esp32DeviceHandler::sync_control_transfer(const SetupPacket
 esp_err_t usbipdcpp::Esp32DeviceHandler::tweak_clear_halt_cmd(const SetupPacket &setup_packet)
 {
     auto target_endp = setup_packet.index;
-    SPDLOG_DEBUG("tweak_clear_halt_cmd");
+    SPDLOG_DEBUG("tweak_clear_halt_cmd for endpoint 0x{:02x}", target_endp);
 
-    auto err = usb_host_endpoint_clear(native_handle, target_endp);
-    if (err != ESP_OK)
+    // 先尝试清除端点（如果已经HALT）
+    esp_err_t err = usb_host_endpoint_clear(native_handle, target_endp);
+    if (err == ESP_ERR_INVALID_STATE)
     {
-        SPDLOG_ERROR("tweak_clear_halt_cmd usb_host_endpoint_clear error: {}", esp_err_to_name(err));
+        // 端点未HALT，这是正常情况，忽略
+        SPDLOG_DEBUG("Endpoint 0x{:02x} not halted, ignoring", target_endp);
+        return ESP_OK;
+    }
+    else if (err != ESP_OK)
+    {
+        SPDLOG_ERROR("usb_host_endpoint_clear failed: %s", esp_err_to_name(err));
         return err;
     }
     return ESP_OK;
 }
-
 esp_err_t usbipdcpp::Esp32DeviceHandler::tweak_set_interface_cmd(const SetupPacket &setup_packet)
 {
 

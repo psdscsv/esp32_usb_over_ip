@@ -6,11 +6,58 @@
 #include <string>
 #include <sstream>
 #include <format>
+#include <esp_heap_caps.h>
 
 namespace usbipdcpp
 {
     using error_code = std::error_code;
+
+    template <typename T>
+    class PsramAllocator
+    {
+    public:
+        using value_type = T;
+        using pointer = T *;
+        using const_pointer = const T *;
+        using reference = T &;
+        using const_reference = const T &;
+        using size_type = std::size_t;
+        using difference_type = std::ptrdiff_t;
+
+        PsramAllocator() = default;
+
+        template <typename U>
+        PsramAllocator(const PsramAllocator<U> &) {}
+
+        pointer allocate(size_type n)
+        {
+            size_t bytes = n * sizeof(T);
+            // 首先尝试从PSRAM分配
+            pointer ptr = static_cast<pointer>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM));
+
+            // 如果PSRAM分配失败，回退到内部RAM
+            if (!ptr)
+            {
+                ptr = static_cast<pointer>(malloc(bytes));
+            }
+
+            return ptr;
+        }
+
+        void deallocate(pointer p, size_type)
+        {
+            if (p)
+            {
+                heap_caps_free(p);
+            }
+        }
+    };
+
+    // 标准数据类型 - 使用标准分配器
     using data_type = std::vector<std::uint8_t>;
+
+    // PSRAM数据类型 - 用于大型缓冲区
+    using psram_data_type = std::vector<std::uint8_t, PsramAllocator<std::uint8_t>>;
 
     template <std::size_t N>
     using array_data_type = std::array<std::uint8_t, N>;

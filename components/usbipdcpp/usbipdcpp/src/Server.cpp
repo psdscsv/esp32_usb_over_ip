@@ -191,7 +191,7 @@ asio::awaitable<void> usbipdcpp::Server::do_accept(asio::ip::tcp::acceptor &acce
 
             // 函数会直接返回，但内部获取了自身的shared_ptr因此不会被析构
             // 默认禁用批量模式以提供流式传输。如果需要可以在以后启用
-            session->set_batch_mode(true);
+            session->set_batch_mode(false);
             // 每个session启动一个线程，防止某些必须阻塞的操作影响其他设备
             session->run();
         }
