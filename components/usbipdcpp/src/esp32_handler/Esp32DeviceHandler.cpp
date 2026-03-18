@@ -999,12 +999,18 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
                 }
             }
 
-            callback_arg.handler.session.load()->submit_ret_submit(
-                UsbIpResponse::UsbIpRetSubmit::create_ret_submit_with_status_and_no_iso(
-                    callback_arg.seqnum,
-                    trxstat2error(trx->status),
-                    response_data));
+            auto response = UsbIpResponse::UsbIpRetSubmit::create_ret_submit_with_status_and_no_iso(
+                callback_arg.seqnum,
+                trxstat2error(trx->status),
+                response_data);
 
+            // 对于 OUT 传输，actual_length 应等于实际发送的字节数
+            if (callback_arg.is_out)
+            {
+                response.actual_length = trx->actual_num_bytes;
+            }
+
+            callback_arg.handler.session.load()->submit_ret_submit(std::move(response));
             usb_host_transfer_free(trx);
         }
     }
