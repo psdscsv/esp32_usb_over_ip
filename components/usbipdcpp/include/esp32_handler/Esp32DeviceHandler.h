@@ -120,14 +120,7 @@ namespace usbipdcpp
         void check_and_clean_memory();
         std::chrono::steady_clock::time_point last_memory_check;
 
-        // 最大并发传输数限制，可通过 sdkconfig 配置
-#ifdef CONFIG_USBIP_MAX_CONCURRENT_TRANSFERS
-        static constexpr size_t MAX_CONCURRENT_TRANSFERS = CONFIG_USBIP_MAX_CONCURRENT_TRANSFERS;
-#else
-        // 默认较小值以防堆内存突然被抢占，运行时真实并发仍由
-        // concurrent_transfer_count 控制。
-        static constexpr size_t MAX_CONCURRENT_TRANSFERS = 32;
-#endif
+        // 最大并发传输数限制，通过 concurrent_transfer_count
         std::atomic<size_t> concurrent_transfer_count{0};
 
         // 统计零拷贝传输次数

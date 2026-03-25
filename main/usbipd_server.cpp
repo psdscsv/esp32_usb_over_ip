@@ -59,7 +59,7 @@ void UsbipServer::init_usb_host()
     // 使用零初始化然后设置字段的方式，避免字段顺序和缺失字段的问题
     usb_host_config_t host_config = {};
     host_config.skip_phy_setup = false;
-    host_config.intr_flags = ESP_INTR_FLAG_LEVEL1;
+    host_config.intr_flags = ESP_INTR_FLAG_LEVEL3;
     host_config.enum_filter_cb = nullptr;
     // 其他字段保持为0
 
@@ -75,7 +75,7 @@ void UsbipServer::init_usb_host()
     // 配置USB主机事件线程
     esp_pthread_cfg_t cfg = esp_pthread_get_default_config();
     cfg.prio = 10;
-    cfg.pin_to_core = 1; // 核心1
+    cfg.pin_to_core = 1;
     cfg.thread_name = "usb_host_event_thread";
     cfg.stack_size = 4096;
     esp_pthread_set_cfg(&cfg);

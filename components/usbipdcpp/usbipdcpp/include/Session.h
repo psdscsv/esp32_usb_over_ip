@@ -34,9 +34,9 @@ namespace usbipdcpp
         // 批量处理配置
         struct BatchConfig
         {
-            size_t max_batch_size = 32;                   // 最大批量大小
-            size_t max_batch_bytes = 65536;               // 最大批量字节数
-            std::chrono::milliseconds max_batch_delay{5}; // 最大等待时间
+            size_t max_batch_size = 128;                   // 最大批量大小
+            size_t max_batch_bytes = 65536;                // 最大批量字节数
+            std::chrono::milliseconds max_batch_delay{10}; // 最大等待时间
         };
 
         void set_batch_config(const BatchConfig &config);

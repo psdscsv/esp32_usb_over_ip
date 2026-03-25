@@ -86,7 +86,6 @@ asio::awaitable<void> usbipdcpp::Session::receiver_batch(usbipdcpp::error_code &
             if constexpr (std::is_same_v<UsbIpCommand::UsbIpCmdSubmit, T>) {
                 // 将Submit命令添加到批量缓冲区
                 batch_buffer_.emplace_back(cmd.header.seqnum, std::move(cmd));
-                
                 auto now = std::chrono::steady_clock::now();
                 auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                     now - batch_start_time_);
@@ -108,6 +107,7 @@ asio::awaitable<void> usbipdcpp::Session::receiver_batch(usbipdcpp::error_code &
                 // 这里可以添加按字节计算的逻辑
                 
                 if (should_process && !batch_buffer_.empty()) {
+                    SPDLOG_TRACE("处理批量命令，数量: {}", batch_buffer_.size());
                     process_batch();
                     batch_start_time_ = now;
                 }

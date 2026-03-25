@@ -140,6 +140,6 @@ namespace usbipdcpp
         std::array<std::map<std::uint32_t, TransferInfo>, SEGMENT_COUNT> segments_;
 
         std::atomic<size_t> concurrent_transfer_count_{0};
-        size_t max_concurrent_ = 32;
+        size_t max_concurrent_ = 128;
     };
 }

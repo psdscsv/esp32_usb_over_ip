@@ -170,13 +170,8 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
     // transfer_tracker_内部自动跟踪并发数，无需手动递增/递减
     bool is_out = !ep.is_in();
 
-    // 最大内部传输长度由 SDK 配置项决定，可在 menuconfig 中调整
     // CONFIG_USB_HOST_BULK_TRANSFER_MAX_SIZE 默认可能较小，此处为安全回退
-#ifdef CONFIG_USB_HOST_BULK_TRANSFER_MAX_SIZE
-    constexpr uint32_t MAX_TRANSFER_SIZE = CONFIG_USB_HOST_BULK_TRANSFER_MAX_SIZE;
-#else
     constexpr uint32_t MAX_TRANSFER_SIZE = 64 * 1024;
-#endif
 
     // 请求长度不超过允许的最大值时直接异步提交一个 transfer
     uint32_t adjusted_length = std::min(transfer_buffer_length, MAX_TRANSFER_SIZE);
