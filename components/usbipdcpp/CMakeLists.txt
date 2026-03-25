@@ -1,26 +1,32 @@
-set(usbipdcpp_DIR ${CMAKE_CURRENT_SOURCE_DIR}/usbipdcpp)
+# components/CMakeLists.txt
 
-file(GLOB USBIPDCPP_BASE_SRC_FILES ${usbipdcpp_DIR}/src/*.cpp)
-file(GLOB USBIPDCPP_DEVICE_HANDLER_SRC_FILES ${usbipdcpp_DIR}/src/DeviceHandler/*.cpp)
-file(GLOB USBIPDCPP_INTERFACE_HANDLER_SRC_FILES ${usbipdcpp_DIR}/src/InterfaceHandler/*.cpp)
-
-set(USBIPDCPP_ORIGIN_SRC_FILES
-        ${USBIPDCPP_BASE_SRC_FILES}
-        ${USBIPDCPP_DEVICE_HANDLER_SRC_FILES}
-        ${USBIPDCPP_INTERFACE_HANDLER_SRC_FILES}
-        # 删除了 mock_mouse.cpp 的引用
+# 收集所有子目录中的源文件（支持 .c 和 .cpp）
+file(GLOB_RECURSE COMPONENT_SRCS 
+    "src/DeviceHandler/*.c"
+    "src/DeviceHandler/*.cpp"
+    "src/esp32_handler/*.c"
+    "src/esp32_handler/*.cpp"
+    "src/InterfaceHandler/*.c"
+    "src/InterfaceHandler/*.cpp"
+    "src/server/*.c"
+    "src/server/*.cpp"
 )
 
-file(GLOB USBIPDCPP_ESP32_HANDLER_SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/esp32_handler/*.cpp)
+# 设置包含目录
+set(COMPONENT_ADD_INCLUDEDIRS 
+    "include/DeviceHandler"
+    "include/esp32_handler"
+    "include/InterfaceHandler"
+    "include/server"
+)
 
-set(USBIPDCPP_ALL_SRC_FILES ${USBIPDCPP_ORIGIN_SRC_FILES} ${USBIPDCPP_ESP32_HANDLER_SRC_FILES})
-
-idf_component_register(SRCS ${USBIPDCPP_ALL_SRC_FILES}
-        INCLUDE_DIRS ${usbipdcpp_DIR}/include include 
-        REQUIRES asio lwip sock_utils spdlog usb pthread esp_timer)
-
-add_compile_definitions(
-        #        SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE
-        SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO
-        NDEBUG
+idf_component_register(SRCS ${COMPONENT_SRCS}
+    INCLUDE_DIRS ${COMPONENT_ADD_INCLUDEDIRS}
+    REQUIRES
+        sock_utils
+        asio
+        spdlog
+        usb
+        esp_timer
+        pthread
 )

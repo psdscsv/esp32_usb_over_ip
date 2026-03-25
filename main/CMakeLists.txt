@@ -4,6 +4,7 @@ idf_component_register(
     "main.cpp"
     INCLUDE_DIRS "."
     REQUIRES
+        sock_utils 
         asio
         spdlog
         nvs_flash

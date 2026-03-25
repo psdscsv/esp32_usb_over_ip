@@ -108,35 +108,36 @@ void setup()
     // 初始化WiFi
     {
         wifi_init();
+        /*
+                ESP_LOGI(TAG, "Waiting for WiFi connection...");
+                int wait_count = 0;
+                const int max_wait = 30;
 
-        ESP_LOGI(TAG, "Waiting for WiFi connection...");
-        int wait_count = 0;
-        const int max_wait = 30;
+                while (wait_count < max_wait)
+                {
+                    if (wifi_is_connected())
+                    {
+                        wifi_status_t status;
+                        wifi_get_status(&status);
+                        ESP_LOGI(TAG, "WiFi connected! IP: " IPSTR, IP2STR(&status.ip));
+                        break;
+                    }
 
-        while (wait_count < max_wait)
-        {
-            if (wifi_is_connected())
-            {
-                wifi_status_t status;
-                wifi_get_status(&status);
-                ESP_LOGI(TAG, "WiFi connected! IP: " IPSTR, IP2STR(&status.ip));
-                break;
-            }
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                    wait_count++;
 
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-            wait_count++;
+                    if (wait_count % 10 == 0)
+                    {
+                        ESP_LOGI(TAG, "Still waiting for WiFi... (%d/%d seconds)", wait_count, max_wait);
+                    }
+                    led_set_all(led_handle, 32, 32, 0);
+                }
 
-            if (wait_count % 10 == 0)
-            {
-                ESP_LOGI(TAG, "Still waiting for WiFi... (%d/%d seconds)", wait_count, max_wait);
-            }
-            led_set_all(led_handle, 32, 32, 0);
-        }
-
-        if (!wifi_is_connected())
-        {
-            ESP_LOGW(TAG, "WiFi connection timeout after %d seconds, continuing anyway", max_wait);
-        }
+                if (!wifi_is_connected())
+                {
+                    ESP_LOGW(TAG, "WiFi connection timeout after %d seconds, continuing anyway", max_wait);
+                }
+        */
     }
     // 初始化按钮
     {

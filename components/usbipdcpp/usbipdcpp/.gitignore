@@ -1,8 +1,0 @@
-.idea
-.vscode
-.cache
-cmake-*
-[Bb]uild*
-install
-compile_commands.json
-CMakeUserPresets.json

@@ -1,4 +1,4 @@
-#include "esp32_handler/Esp32Server.h"
+#include "Esp32Server.h"
 
 #include <Session.h>
 #include <usb/usb_helpers.h>
@@ -9,8 +9,8 @@
 
 #include <esp_pthread.h>
 
-#include "esp32_handler/Esp32DeviceHandler.h"
-#include "esp32_handler/tools.h"
+#include "Esp32DeviceHandler.h"
+#include "tools.h"
 
 const char *usbipdcpp::Esp32Server::TAG = "esp32_uspipdcpp_server";
 

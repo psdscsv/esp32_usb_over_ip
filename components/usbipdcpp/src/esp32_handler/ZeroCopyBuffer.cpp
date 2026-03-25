@@ -1,4 +1,4 @@
-#include "esp32_handler/ZeroCopyBuffer.h"
+#include "ZeroCopyBuffer.h"
 #include <spdlog/spdlog.h>
 
 namespace usbipdcpp

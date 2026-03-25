@@ -9,10 +9,10 @@
 #include <asio.hpp>
 #include <usb/usb_host.h>
 
-#include "DeviceHandler/DeviceHandler.h"
+#include "DeviceHandler.h"
 #include "SetupPacket.h"
-#include "esp32_handler/tools.h"
-#include "esp32_handler/ConcurrentTransferTracker.h"
+#include "tools.h"
+#include "ConcurrentTransferTracker.h"
 #include "esp_timer.h"
 
 namespace usbipdcpp
