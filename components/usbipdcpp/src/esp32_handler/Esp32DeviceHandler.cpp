@@ -171,7 +171,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
     bool is_out = !ep.is_in();
 
     // CONFIG_USB_HOST_BULK_TRANSFER_MAX_SIZE 默认可能较小，此处为安全回退
-    constexpr uint32_t MAX_TRANSFER_SIZE = 64 * 1024;
+    constexpr uint32_t MAX_TRANSFER_SIZE = 70 * 1024;
 
     // 请求长度不超过允许的最大值时直接异步提交一个 transfer
     uint32_t adjusted_length = std::min(transfer_buffer_length, MAX_TRANSFER_SIZE);
@@ -186,8 +186,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
         }
     }
 
-    // 如果传输请求大于单次最大值，则仍然尽量异步并行提交多个 transfer，
-    // 但此路径应当很少触发——最好通过 menuconfig 将 MAX_TRANSFER_SIZE 提高到 32K/64K/128K。
+    // 如果传输请求大于单次最大值，则仍然尽量异步并行提交多个 transfer，此路径应当很少触发
     if (!is_out && transfer_buffer_length > MAX_TRANSFER_SIZE)
     {
         SPDLOG_WARN("请求长度 {} 超过 MAX_TRANSFER_SIZE={}，将并行拆分", transfer_buffer_length, MAX_TRANSFER_SIZE);
@@ -237,7 +236,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
             esp_err_t aerr = usb_host_transfer_alloc(submit_len, 0, &chunk_tr);
             if (aerr != ESP_OK)
             {
-                SPDLOG_ERROR("chunk transfer alloc 失败: %s", esp_err_to_name(aerr));
+                SPDLOG_ERROR("chunk transfer alloc 失败: {}", esp_err_to_name(aerr));
                 session.load()->submit_ret_submit(
                     UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
                 all_chunks_submitted_successfully = false;

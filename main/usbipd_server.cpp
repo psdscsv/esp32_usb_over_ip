@@ -154,7 +154,7 @@ void UsbipServer::thread_main()
 
     // 设置TCP优化参数
     int sock = socket(AF_INET, SOCK_STREAM, 0);
-    int buf_size = 128 * 1024; // 128KB缓冲区
+    int buf_size = 64 * 1024; // 64KB缓冲区
     setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &buf_size, sizeof(buf_size));
     setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &buf_size, sizeof(buf_size));
 
