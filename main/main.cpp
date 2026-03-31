@@ -2,13 +2,16 @@
 #include "freertos/FreeRTOS.h"
 #include <iostream>
 
-#include "button_manager.h"
+// #include "button_manager.h"
 #include "wifi_manager.h"
-#include "led_manager.h"
+// #include "led_manager.h"
+#include "pin_define.h"
 
+#include <driver/gpio.h>
 using namespace std;
 const char *TAG = "main";
 // LED配置
+/*
 static const led_config_t led_config = {
     .gpio_num = LED_PIN, // 假设在pin_define.h中定义了LED_GPIO
     .led_num = 1,        // LED数量
@@ -73,11 +76,23 @@ static void button_monitor_task(void *arg)
         vTaskDelay(50 / portTICK_PERIOD_MS); // 50ms检查一次
     }
 }
-
+*/
 void setup()
 {
+vTaskDelay(1000 / portTICK_PERIOD_MS);
     // 初始化LED
     {
+        // 1. 配置GPIO为输出模式
+        gpio_config_t io_conf = {
+            .pin_bit_mask = (1ULL << LED_PIN),    // 选择要配置的引脚
+            .mode = GPIO_MODE_OUTPUT,             // 设置为输出模式
+            .intr_type = GPIO_INTR_DISABLE,       // 禁止中断
+        };
+        gpio_config(&io_conf);
+
+        // 2. 输出高电平
+        gpio_set_level((gpio_num_t)LED_PIN, 1);
+        /*
         led_handle = led_init(&led_config);
         if (led_handle == NULL)
         {
@@ -89,6 +104,7 @@ void setup()
 
         // 设置初始颜色
         led_set_all(led_handle, 32, 0, 32);
+        */
     }
 
     // 初始化NVS
@@ -102,43 +118,14 @@ void setup()
         }
         ESP_ERROR_CHECK(ret);
         ESP_LOGI(TAG, "NVS initialized");
-        led_set_all(led_handle, 32, 0, 0);
+        // led_set_all(led_handle, 32, 0, 0);
     }
 
     // 初始化WiFi
     {
         wifi_init();
-        /*
-                ESP_LOGI(TAG, "Waiting for WiFi connection...");
-                int wait_count = 0;
-                const int max_wait = 30;
-
-                while (wait_count < max_wait)
-                {
-                    if (wifi_is_connected())
-                    {
-                        wifi_status_t status;
-                        wifi_get_status(&status);
-                        ESP_LOGI(TAG, "WiFi connected! IP: " IPSTR, IP2STR(&status.ip));
-                        break;
-                    }
-
-                    std::this_thread::sleep_for(std::chrono::seconds(1));
-                    wait_count++;
-
-                    if (wait_count % 10 == 0)
-                    {
-                        ESP_LOGI(TAG, "Still waiting for WiFi... (%d/%d seconds)", wait_count, max_wait);
-                    }
-                    led_set_all(led_handle, 32, 32, 0);
-                }
-
-                if (!wifi_is_connected())
-                {
-                    ESP_LOGW(TAG, "WiFi connection timeout after %d seconds, continuing anyway", max_wait);
-                }
-        */
     }
+    /*
     // 初始化按钮
     {
         esp_err_t ret = button_init();
@@ -154,6 +141,7 @@ void setup()
         xTaskCreate(button_monitor_task, "btn_monitor", 4096, NULL, 5, NULL);
         led_set_all(led_handle, 0, 0, 32);
     }
+    */
 }
 // C入口函数
 extern "C" void app_main(void)

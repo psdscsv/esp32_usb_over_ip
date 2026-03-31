@@ -171,7 +171,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
     bool is_out = !ep.is_in();
 
     // CONFIG_USB_HOST_BULK_TRANSFER_MAX_SIZE 默认可能较小，此处为安全回退
-    constexpr uint32_t MAX_TRANSFER_SIZE = 70 * 1024;
+    constexpr uint32_t MAX_TRANSFER_SIZE = 64 * 1024;
 
     // 请求长度不超过允许的最大值时直接异步提交一个 transfer
     uint32_t adjusted_length = std::min(transfer_buffer_length, MAX_TRANSFER_SIZE);
