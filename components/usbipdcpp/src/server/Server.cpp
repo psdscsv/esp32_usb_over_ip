@@ -169,7 +169,13 @@ asio::awaitable<void> usbipdcpp::Server::do_accept(asio::ip::tcp::acceptor &acce
 {
     while (true)
     {
-        spdlog::info("Waiting for a new connection...");
+        if (should_stop)
+        {
+            SPDLOG_INFO("Server stopping, exit accept loop");
+            co_return;
+        }
+
+        SPDLOG_INFO("Waiting for a new connection...");
 
         // 先创建一个Session，同时内部创建一个自己的socket
         auto session = std::make_shared<Session>(*this);
@@ -180,24 +186,111 @@ asio::awaitable<void> usbipdcpp::Server::do_accept(asio::ip::tcp::acceptor &acce
 
         if (!ec)
         {
+            // ============ 统一设置 TCP 优化参数 ============
+            {
+                asio::error_code set_ec;
+
+                // 1. 禁用 Nagle 算法，降低小包延迟
+                //    对于 USB/IP 这种混合大小包的协议至关重要
+                session->socket.set_option(asio::ip::tcp::no_delay(true), set_ec);
+                if (set_ec)
+                {
+                    SPDLOG_WARN("Failed to set TCP_NODELAY: {}", set_ec.message());
+                }
+                else
+                {
+                    SPDLOG_DEBUG("TCP_NODELAY set successfully");
+                }
+
+                // 2. 增大发送缓冲区
+                //    128KB 适合 USB 批量传输，根据实际内存情况可调整
+                constexpr int snd_buf_size = 128 * 1024; // 128KB
+                session->socket.set_option(
+                    asio::ip::tcp::socket::send_buffer_size(snd_buf_size), set_ec);
+                if (set_ec)
+                {
+                    SPDLOG_WARN("Failed to set SO_SNDBUF={}: {}", snd_buf_size, set_ec.message());
+                }
+                else
+                {
+                    SPDLOG_DEBUG("SO_SNDBUF={} set successfully", snd_buf_size);
+                }
+
+                // 3. 增大接收缓冲区
+                constexpr int rcv_buf_size = 128 * 1024; // 128KB
+                session->socket.set_option(
+                    asio::ip::tcp::socket::receive_buffer_size(rcv_buf_size), set_ec);
+                if (set_ec)
+                {
+                    SPDLOG_WARN("Failed to set SO_RCVBUF={}: {}", rcv_buf_size, set_ec.message());
+                }
+                else
+                {
+                    SPDLOG_DEBUG("SO_RCVBUF={} set successfully", rcv_buf_size);
+                }
+
+                // 4. 启用 TCP Keep-Alive（可选但推荐）
+                //    防止死连接占用资源
+                session->socket.set_option(asio::ip::tcp::socket::keep_alive(true), set_ec);
+                if (set_ec)
+                {
+                    SPDLOG_WARN("Failed to set SO_KEEPALIVE: {}", set_ec.message());
+                }
+                else
+                {
+                    SPDLOG_DEBUG("SO_KEEPALIVE set successfully");
+                }
+
+                // 7. 验证实际设置的缓冲区大小
+                //    Linux/ESP-IDF 内核可能会将缓冲区大小调整为系统允许的范围内
+                {
+                    asio::ip::tcp::socket::send_buffer_size actual_snd{0};
+                    asio::ip::tcp::socket::receive_buffer_size actual_rcv{0};
+
+                    if (session->socket.get_option(actual_snd, set_ec); !set_ec)
+                    {
+                        SPDLOG_DEBUG("Actual SO_SNDBUF = {}", actual_snd.value());
+                        if (actual_snd.value() < snd_buf_size / 2)
+                        {
+                            SPDLOG_WARN("SO_SNDBUF is much smaller than requested ({} < {}). "
+                                        "Consider increasing lwIP TCP_SND_BUF in sdkconfig.",
+                                        actual_snd.value(), snd_buf_size);
+                        }
+                    }
+
+                    if (session->socket.get_option(actual_rcv, set_ec); !set_ec)
+                    {
+                        SPDLOG_DEBUG("Actual SO_RCVBUF = {}", actual_rcv.value());
+                        if (actual_rcv.value() < rcv_buf_size / 2)
+                        {
+                            SPDLOG_WARN("SO_RCVBUF is much smaller than requested ({} < {}). "
+                                        "Consider increasing lwIP TCP_WND in sdkconfig.",
+                                        actual_rcv.value(), rcv_buf_size);
+                        }
+                    }
+                }
+            }
+            // ============ TCP 参数设置结束 ============
+
             {
                 std::lock_guard lock(session_list_mutex);
                 sessions.emplace_back(session);
             }
+
             auto remote_endpoint = session->socket.remote_endpoint();
-            auto remote_endpoint_name = std::format("{}:{}", remote_endpoint.address().to_string(),
+            auto remote_endpoint_name = std::format("{}:{}",
+                                                    remote_endpoint.address().to_string(),
                                                     remote_endpoint.port());
             spdlog::info("A new connection from {}", remote_endpoint_name);
 
             // 函数会直接返回，但内部获取了自身的shared_ptr因此不会被析构
-
             session->set_batch_mode(false);
             // 每个session启动一个线程，防止某些必须阻塞的操作影响其他设备
             session->run();
         }
         else if (ec == asio::error::operation_aborted)
         {
-            SPDLOG_ERROR("Operation aborted：{}", ec.message());
+            SPDLOG_INFO("Operation aborted：{}", ec.message());
             break;
         }
         else
