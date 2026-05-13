@@ -84,66 +84,6 @@ namespace usbipdcpp
         return metrics;
     }
 
-    NetworkPerformanceAdapter::BatchConfigSuggestion
-    NetworkPerformanceAdapter::get_batch_config_suggestion() const
-    {
-        auto metrics = get_current_metrics();
-        BatchConfigSuggestion suggestion;
-
-        // 根据延迟调整批处理延迟
-        if (metrics.rtt_ms < 3)
-        {
-            // 低延迟网络，可以用更小的延迟
-            suggestion.max_batch_delay = std::chrono::milliseconds(2);
-        }
-        else if (metrics.rtt_ms > 20)
-        {
-            // 高延迟网络，增加batch delay以聚集更多请求
-            suggestion.max_batch_delay = std::chrono::milliseconds(10);
-        }
-        else
-        {
-            suggestion.max_batch_delay = std::chrono::milliseconds(5);
-        }
-
-        // 根据吞吐量调整批处理大小
-        if (metrics.throughput_mbps > 100)
-        {
-            // 高吞吐量，可以用更大的batch
-            suggestion.max_batch_size = 64;
-            suggestion.max_batch_bytes = 131072; // 128KB
-        }
-        else if (metrics.throughput_mbps < 10)
-        {
-            // 低吞吐量，减小batch以降低延迟
-            suggestion.max_batch_size = 16;
-            suggestion.max_batch_bytes = 32768; // 32KB
-        }
-        else
-        {
-            suggestion.max_batch_size = 32;
-            suggestion.max_batch_bytes = 65536; // 64KB
-        }
-
-        // 丢包率影响：高丢包率时减小batch
-        if (metrics.packet_loss_rate > 0.01)
-        {
-            suggestion.max_batch_size = std::max(size_t(8), suggestion.max_batch_size / 2);
-            suggestion.max_batch_bytes /= 2;
-        }
-
-        SPDLOG_DEBUG("批处理建议："
-                     " rtt={}ms, throughput={}Mbps, loss_rate={}%, "
-                     "batch_size={}, batch_bytes={}, batch_delay={}ms",
-                     metrics.rtt_ms, metrics.throughput_mbps,
-                     metrics.packet_loss_rate * 100,
-                     suggestion.max_batch_size,
-                     suggestion.max_batch_bytes,
-                     suggestion.max_batch_delay.count());
-
-        return suggestion;
-    }
-
     uint32_t NetworkPerformanceAdapter::get_suggested_request_size() const
     {
         auto metrics = get_current_metrics();

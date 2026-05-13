@@ -15,6 +15,7 @@
 #include "protocol.h"
 #include "type.h"
 #include "esp_timer.h"
+
 namespace usbipdcpp
 {
     class Server;
@@ -31,27 +32,6 @@ namespace usbipdcpp
         explicit Session(Server &server);
         Session(const Session &) = delete;
         Session(Session &&) = delete;
-        // 批量处理配置
-        struct BatchConfig
-        {
-            size_t max_batch_size = 128;                   // 最大批量大小
-            size_t max_batch_bytes = 65536;                // 最大批量字节数
-            std::chrono::milliseconds max_batch_delay{10}; // 最大等待时间
-        };
-
-        void set_batch_config(const BatchConfig &config);
-
-        /**
-         * @brief Enable or disable batching mode. When disabled the session will
-         *        immediately process each USB/IP submit packet, providing a
-         *        stream‑like behaviour. Batching still works when enabled, and
-         *        the configuration in `BatchConfig` is respected.
-         *
-         *        By default batching is disabled to provide streaming data. Call
-         *        this with `true` to restore the previous batch behaviour.
-         */
-        void set_batch_mode(bool enabled);
-        bool batch_mode_enabled() const;
 
         /**
          * @brief 线程安全，用来查询某一序列是否被unlink了。
@@ -90,24 +70,9 @@ namespace usbipdcpp
         ~Session();
 
     private:
-        // 批量处理相关成员
-        BatchConfig batch_config_;
-        std::vector<std::pair<std::uint32_t, UsbIpCommand::UsbIpCmdSubmit>> batch_buffer_;
-        std::chrono::steady_clock::time_point batch_start_time_;
-
-        std::unordered_map<std::uint32_t, int64_t> recv_timestamps_; // seqnum -> 接收时间 (us)
-        std::shared_mutex timestamps_mutex_;
-        std::atomic<uint64_t> total_latency_us_{0}; // 累积总延迟
-        std::atomic<uint32_t> request_count_{0};
-
-        bool batch_processing_ = false;
-        // true 表示使用批量模式；false 表示流式(每个请求立即处理)
-        bool batch_mode_enabled_ = false; // 默认禁用批量，启用流式传输
-
-        // 批量处理方法
-        asio::awaitable<void> receiver_batch(usbipdcpp::error_code &receiver_ec);
+        // 流式接收处理
         asio::awaitable<void> receiver_single(usbipdcpp::error_code &receiver_ec);
-        void process_batch();
+
         /**
          * @brief 新建Session时由Server调用
          */
@@ -123,15 +88,9 @@ namespace usbipdcpp
 
         using transfer_channel_type = asio::experimental::channel<void(asio::error_code, UsbIpResponse::RetVariant)>;
 
-        // 增大传输通道缓冲，避免大量并发ret_submit/ret_unlink导致channel被填满
         static constexpr std::size_t transfer_channel_size = 2048;
         std::unique_ptr<transfer_channel_type> transfer_channel = nullptr;
-        // using transfer_channel = asio::experimental::channel<void(asio::error_code)>;
-        /**
-         * @brief 不停地传输urb
-         * @param transferring_ec 传输urb途中的ec
-         * @return
-         */
+
         asio::awaitable<void> transfer_loop(usbipdcpp::error_code &transferring_ec);
 
         asio::awaitable<void> receiver(usbipdcpp::error_code &receiver_ec);
@@ -159,5 +118,11 @@ namespace usbipdcpp
 
         // 这个线程结束后自动析构this
         std::thread run_thread;
+
+        // 延迟统计相关
+        std::unordered_map<std::uint32_t, int64_t> recv_timestamps_;
+        std::shared_mutex timestamps_mutex_;
+        std::atomic<uint64_t> total_latency_us_{0};
+        std::atomic<uint32_t> request_count_{0};
     };
 }

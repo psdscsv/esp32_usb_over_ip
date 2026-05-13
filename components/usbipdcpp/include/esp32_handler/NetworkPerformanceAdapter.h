@@ -31,16 +31,6 @@ namespace usbipdcpp
             std::chrono::system_clock::time_point timestamp;
         };
 
-        /**
-         * @brief 动态批处理配置建议
-         */
-        struct BatchConfigSuggestion
-        {
-            size_t max_batch_size = 32;
-            size_t max_batch_bytes = 65536;
-            std::chrono::milliseconds max_batch_delay{5};
-        };
-
         NetworkPerformanceAdapter(size_t history_window = 100);
 
         /**
@@ -67,11 +57,6 @@ namespace usbipdcpp
          * @brief 获取当前性能指标
          */
         PerformanceMetrics get_current_metrics() const;
-
-        /**
-         * @brief 根据当前网络状况获取最优的批处理建议
-         */
-        BatchConfigSuggestion get_batch_config_suggestion() const;
 
         /**
          * @brief 获取建议的USB请求大小
