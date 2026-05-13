@@ -79,14 +79,13 @@ static void button_monitor_task(void *arg)
 */
 void setup()
 {
-vTaskDelay(1000 / portTICK_PERIOD_MS);
     // 初始化LED
     {
         // 1. 配置GPIO为输出模式
         gpio_config_t io_conf = {
-            .pin_bit_mask = (1ULL << LED_PIN),    // 选择要配置的引脚
-            .mode = GPIO_MODE_OUTPUT,             // 设置为输出模式
-            .intr_type = GPIO_INTR_DISABLE,       // 禁止中断
+            .pin_bit_mask = (1ULL << LED_PIN), // 选择要配置的引脚
+            .mode = GPIO_MODE_OUTPUT,          // 设置为输出模式
+            .intr_type = GPIO_INTR_DISABLE,    // 禁止中断
         };
         gpio_config(&io_conf);
 
@@ -154,7 +153,10 @@ extern "C" void app_main(void)
 
     // 启动服务器
     server.start();
-    vTaskDelay(pdMS_TO_TICKS(1));
-    // 注意：这里不会执行到下面，因为start()会阻塞
-    // 实际的停止应该在服务器内部处理
+
+    // 服务器运行中，主任务等待
+    while (true)
+    {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 }

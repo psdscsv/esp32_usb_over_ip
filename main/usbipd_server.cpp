@@ -16,6 +16,7 @@
 
 #include <lwip/tcp.h>
 #include <lwip/netif.h>
+
 using namespace std;
 
 const char *UsbipServer::TAG = "usbip_server";
@@ -52,6 +53,73 @@ void UsbipServer::ip_event_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
+// USB 事件任务函数
+void UsbipServer::usb_host_event_task_func(void *arg)
+{
+    auto *server = static_cast<UsbipServer *>(arg);
+    ESP_LOGI(server->TAG, "USB host event thread started on core %d", xPortGetCoreID());
+
+    bool has_clients = true;
+    bool has_devices = false;
+    while (has_clients)
+    {
+        uint32_t event_flags;
+        esp_err_t err = usb_host_lib_handle_events(portMAX_DELAY, &event_flags);
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(server->TAG, "USB host lib handle events error: %s", esp_err_to_name(err));
+            break;
+        }
+
+        if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS)
+        {
+            ESP_LOGI(server->TAG, "No USB clients");
+            if (ESP_OK == usb_host_device_free_all())
+            {
+                ESP_LOGI(server->TAG, "All devices marked as free");
+                has_clients = false;
+            }
+            else
+            {
+                ESP_LOGI(server->TAG, "Waiting for all devices to be freed");
+                has_devices = true;
+            }
+        }
+
+        if (has_devices && (event_flags & USB_HOST_LIB_EVENT_FLAGS_ALL_FREE))
+        {
+            ESP_LOGI(server->TAG, "All USB devices freed");
+            has_clients = false;
+        }
+    }
+
+    ESP_LOGI(server->TAG, "Uninstalling USB Host Library");
+    usb_host_uninstall();
+    ESP_LOGI(server->TAG, "USB host event thread finished");
+    vTaskDelete(NULL);
+}
+
+// 主工作线程任务函数
+void UsbipServer::main_worker_task_func(void *arg)
+{
+    auto *server = static_cast<UsbipServer *>(arg);
+    ESP_LOGI(server->TAG, "Main thread started on core %d", xPortGetCoreID());
+    ESP_LOGI(server->TAG, "Thread start heap: %d bytes", esp_get_free_heap_size());
+
+    try
+    {
+        server->thread_main();
+    }
+    catch (const std::exception &e)
+    {
+        ESP_LOGE(server->TAG, "Main thread exception: %s", e.what());
+    }
+
+    ESP_LOGI(server->TAG, "Thread end heap: %d bytes", esp_get_free_heap_size());
+    ESP_LOGI(server->TAG, "Main thread finished");
+    vTaskDelete(NULL);
+}
+
 void UsbipServer::init_usb_host()
 {
     ESP_LOGI(TAG, "Installing USB Host Library");
@@ -61,7 +129,6 @@ void UsbipServer::init_usb_host()
     host_config.skip_phy_setup = false;
     host_config.intr_flags = ESP_INTR_FLAG_LEVEL3;
     host_config.enum_filter_cb = nullptr;
-    // 其他字段保持为0
 
     esp_err_t ret = usb_host_install(&host_config);
     if (ret != ESP_OK)
@@ -72,55 +139,15 @@ void UsbipServer::init_usb_host()
 
     ESP_LOGI(TAG, "USB Host Library installed successfully");
 
-    // 配置USB主机事件线程
-    esp_pthread_cfg_t cfg = esp_pthread_get_default_config();
-    cfg.prio = 10;
-    cfg.pin_to_core = 1;
-    cfg.thread_name = "usb_host_event_thread";
-    cfg.stack_size = 4096;
-    esp_pthread_set_cfg(&cfg);
-
-    // 启动USB主机事件处理线程
-    usb_host_event_thread = std::thread([this]()
-                                        {
-        ESP_LOGI(TAG, "USB host event thread started");
-        
-        bool has_clients = true;
-        bool has_devices = false;
-        while (has_clients) {
-            uint32_t event_flags;
-            esp_err_t err = usb_host_lib_handle_events(portMAX_DELAY, &event_flags);
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "USB host lib handle events error: %s", esp_err_to_name(err));
-                break;
-            }
-            
-            if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
-                ESP_LOGI(TAG, "No USB clients");
-                if (ESP_OK == usb_host_device_free_all()) {
-                    ESP_LOGI(TAG, "All devices marked as free");
-                    has_clients = false;
-                }
-                else {
-                    ESP_LOGI(TAG, "Waiting for all devices to be freed");
-                    has_devices = true;
-                }
-            }
-            
-            if (has_devices && (event_flags & USB_HOST_LIB_EVENT_FLAGS_ALL_FREE)) {
-                ESP_LOGI(TAG, "All USB devices freed");
-                has_clients = false;
-            }
-        }
-        
-        ESP_LOGI(TAG, "Uninstalling USB Host Library");
-        usb_host_uninstall();
-        
-        ESP_LOGI(TAG, "USB host event thread finished"); });
-
-    // 恢复默认线程配置
-    esp_pthread_cfg_t default_cfg = esp_pthread_get_default_config();
-    esp_pthread_set_cfg(&default_cfg);
+    // 启动USB主机事件处理任务（使用 FreeRTOS API）
+    xTaskCreatePinnedToCore(
+        usb_host_event_task_func,
+        "usb_host_event",
+        4096,
+        this,
+        10,
+        &usb_host_event_task,
+        1);
 }
 
 void UsbipServer::init_server()
@@ -181,33 +208,21 @@ void UsbipServer::thread_main()
 
 void UsbipServer::start()
 {
-    ESP_LOGW(TAG, "usbip服务器任务运行于核心 %d", xPortGetCoreID());
     ESP_LOGI(TAG, "========== USB/IP Server Starting ==========");
     ESP_LOGI(TAG, "Application start");
     ESP_LOGI(TAG, "Free heap: %d bytes", esp_get_free_heap_size());
     ESP_LOGI(TAG, "Minimum free heap: %d bytes", esp_get_minimum_free_heap_size());
 
-    // 创建主线程
-    main_worker_thread = std::thread([this]()
-                                     {
-        ESP_LOGI(TAG, "Main thread started");
-        ESP_LOGI(TAG, "Thread start heap: %d bytes", esp_get_free_heap_size());
-        
-        try
-        {
-            thread_main();
-        }
-        catch (const std::exception &e)
-        {
-            ESP_LOGE(TAG, "Main thread exception: %s", e.what());
-        }
-        
-        ESP_LOGI(TAG, "Thread end heap: %d bytes", esp_get_free_heap_size());
-        ESP_LOGI(TAG, "Main thread finished"); });
-
-    // 设置主线程配置
-    esp_pthread_cfg_t main_cfg = create_config("main_worker_thread", 0, 8192, 5);
-    esp_pthread_set_cfg(&main_cfg);
+    // 创建主任务（使用 FreeRTOS API）
+    xTaskCreatePinnedToCore(
+        main_worker_task_func,
+        "main_worker",
+        8192,
+        this,
+        5,
+        &main_worker_task,
+        1 // 核心 1
+    );
 }
 
 void UsbipServer::stop()
@@ -221,15 +236,18 @@ void UsbipServer::stop()
         server.reset();
     }
 
-    // 等待线程结束
-    if (main_worker_thread.joinable())
+    // 等待并删除主任务
+    if (main_worker_task)
     {
-        main_worker_thread.join();
+        vTaskDelete(main_worker_task);
+        main_worker_task = nullptr;
     }
 
-    if (usb_host_event_thread.joinable())
+    // 等待并删除 USB 事件任务
+    if (usb_host_event_task)
     {
-        usb_host_event_thread.join();
+        vTaskDelete(usb_host_event_task);
+        usb_host_event_task = nullptr;
     }
 
     ESP_LOGI(TAG, "========== USB/IP Server Finished ==========");
