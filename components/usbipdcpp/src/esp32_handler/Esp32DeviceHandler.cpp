@@ -953,8 +953,9 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
 
     if (should_send_response && !std::get<0>(unlink_found))
     {
-        if (!callback_arg.is_out && trx->actual_num_bytes > static_cast<int>(data_offset))
+        if (!callback_arg.is_out && trx->actual_num_bytes > static_cast<int>(data_offset) && 0) // 关闭零拷贝功能
         {
+            SPDLOG_ERROR("零拷贝功能已关闭");
             callback_arg.handler.zero_copy_count++;
 
             SPDLOG_TRACE("零拷贝响应: seq={}, 实际长度={}, 偏移={}, 总计零拷贝={}",
@@ -979,18 +980,29 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
         else
         {
             data_type response_data;
-            if (!callback_arg.is_out && trx->actual_num_bytes > static_cast<int>(data_offset))
-            {
-                size_t actual_data_len = trx->actual_num_bytes - data_offset;
-                actual_data_len = std::min(actual_data_len,
-                                           static_cast<size_t>(callback_arg.original_transfer_buffer_length));
+            uint32_t actual_len = 0;
 
-                if (actual_data_len > 0)
+            if (!callback_arg.is_out)
+            {
+                // IN 传输
+                if (trx->actual_num_bytes > static_cast<int>(data_offset))
                 {
-                    response_data.assign(
-                        trx->data_buffer + data_offset,
-                        trx->data_buffer + data_offset + actual_data_len);
+                    size_t data_len = trx->actual_num_bytes - data_offset;
+                    data_len = std::min(data_len, static_cast<size_t>(callback_arg.original_transfer_buffer_length));
+                    if (data_len > 0)
+                    {
+                        response_data.assign(trx->data_buffer + data_offset,
+                                             trx->data_buffer + data_offset + data_len);
+                        actual_len = data_len;
+                    }
                 }
+                // 对于没有数据的 IN 传输（例如 STATUS 阶段），actual_len 保持 0，response_data 为空
+            }
+            else
+            {
+                // OUT 传输：通常不需要返回数据，但如果有数据（如控制传输的 OUT DATA 阶段），则需处理
+                // 这里假设 OUT 传输不需要返回数据负载，但 actual_length 应为实际发送的字节数
+                actual_len = trx->actual_num_bytes;
             }
 
             auto response = UsbIpResponse::UsbIpRetSubmit::create_ret_submit_with_status_and_no_iso(
@@ -998,10 +1010,15 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
                 trxstat2error(trx->status),
                 response_data);
 
-            // 对于 OUT 传输，actual_length 应等于实际发送的字节数
+            // 强制设置 actual_length
+            response.actual_length = actual_len;
+
+            // 对于 OUT 传输，确保没有多余数据
             if (callback_arg.is_out)
             {
-                response.actual_length = trx->actual_num_bytes;
+                // 如果 actual_len > 0 且 response_data 为空，需要确保协议发送正确
+                // create_ret_submit_with_status_and_no_iso 如果 response_data 为空，则不会发送数据负载
+                // 这样是可行的
             }
 
             callback_arg.handler.session.load()->submit_ret_submit(std::move(response));
