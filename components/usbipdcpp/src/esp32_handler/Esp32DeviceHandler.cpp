@@ -8,6 +8,11 @@
 #include "SetupPacket.h"
 #include "constant.h"
 #include "endpoint.h"
+
+#ifndef USB_SETUP_PACKET_SIZE
+#define USB_SETUP_PACKET_SIZE 8
+#endif
+
 const char *usbipdcpp::Esp32DeviceHandler::TAG = "Esp32DeviceHandler";
 
 usbipdcpp::Esp32DeviceHandler::Esp32DeviceHandler(UsbDevice &handle_device, usb_device_handle_t native_handle,
@@ -845,9 +850,9 @@ usb_transfer_status_t usbipdcpp::Esp32DeviceHandler::error2trxstat(int e)
         return USB_TRANSFER_STATUS_ERROR;
     }
 }
+
 void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
 {
-
     auto callback_arg_ptr = static_cast<esp32_callback_args *>(trx->context);
     if (!callback_arg_ptr)
     {
@@ -856,25 +861,6 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
     }
 
     auto &callback_arg = *callback_arg_ptr;
-    uint64_t t_now = esp_timer_get_time();
-
-    // 计算延迟（仅对批量传输且非拆分情况）
-    if (callback_arg.transfer_type == USB_TRANSFER_TYPE_BULK && callback_arg.counted_in_concurrent)
-    {
-        uint64_t recv2submit = callback_arg.submit_time - callback_arg.recv_time;
-        uint64_t submit2usb = t_now - callback_arg.submit_time;
-        uint64_t total = t_now - callback_arg.recv_time;
-
-        // 每 10 次打印一次，避免日志过多
-        static uint32_t counter = 0;
-        if (++counter % 100 == 0)
-        {
-            ESP_LOGI("USBIP_PERF",
-                     "BULK seq=%u, len=%u, recv2submit=%llu us, submit2usb=%llu us, total=%llu us",
-                     callback_arg.seqnum, callback_arg.original_transfer_buffer_length,
-                     recv2submit, submit2usb, total);
-        }
-    }
     callback_arg.handler.total_transfer_count++;
 
     if (callback_arg.handler.all_transfer_should_stop)
@@ -890,12 +876,14 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
     auto unlink_found = callback_arg.handler.session.load()->get_unlink_seqnum(callback_arg.seqnum);
     bool should_send_response = true;
 
+    // 数据偏移：仅控制传输的 IN 方向需要跳过 SETUP 包
     size_t data_offset = 0;
     if (callback_arg.transfer_type == USB_TRANSFER_TYPE_CTRL && !callback_arg.is_out)
     {
-        data_offset = USB_SETUP_PACKET_SIZE;
+        data_offset = USB_SETUP_PACKET_SIZE; // 8 bytes
     }
 
+    // 处理各种传输状态
     switch (trx->status)
     {
     case USB_TRANSFER_STATUS_COMPLETED:
@@ -953,88 +941,63 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
 
     if (should_send_response && !std::get<0>(unlink_found))
     {
-        if (!callback_arg.is_out && trx->actual_num_bytes > static_cast<int>(data_offset) && 0) // 关闭零拷贝功能
+        int data_len = 0;
+        if (!callback_arg.is_out)
         {
-            SPDLOG_ERROR("零拷贝功能已关闭");
-            callback_arg.handler.zero_copy_count++;
-
-            SPDLOG_TRACE("零拷贝响应: seq={}, 实际长度={}, 偏移={}, 总计零拷贝={}",
-                         callback_arg.seqnum,
-                         trx->actual_num_bytes - data_offset,
-                         data_offset,
-                         callback_arg.handler.zero_copy_count.load());
-
-            // 使用新的工厂函数创建零拷贝响应
-            auto response = UsbIpResponse::UsbIpRetSubmit::create_ret_submit(
-                callback_arg.seqnum,
-                trxstat2error(trx->status),
-                0,
-                0,
-                UsbTransferPtr(trx), // 转移所有权
-                data_offset,
-                {});
-
-            callback_arg.handler.session.load()->submit_ret_submit(std::move(response));
-            // 注意：trx 已经被转移所有权，不能调用 usb_host_transfer_free
+            // IN 传输：实际数据长度 = 总字节数 - 偏移量
+            data_len = trx->actual_num_bytes - static_cast<int>(data_offset);
+            if (data_len < 0)
+                data_len = 0;
         }
         else
         {
-            data_type response_data;
-            uint32_t actual_len = 0;
+            // OUT 传输：实际发送的字节数
+            data_len = trx->actual_num_bytes;
+        }
 
-            if (!callback_arg.is_out)
-            {
-                // IN 传输
-                if (trx->actual_num_bytes > static_cast<int>(data_offset))
-                {
-                    size_t data_len = trx->actual_num_bytes - data_offset;
-                    data_len = std::min(data_len, static_cast<size_t>(callback_arg.original_transfer_buffer_length));
-                    if (data_len > 0)
-                    {
-                        response_data.assign(trx->data_buffer + data_offset,
-                                             trx->data_buffer + data_offset + data_len);
-                        actual_len = data_len;
-                    }
-                }
-                // 对于没有数据的 IN 传输（例如 STATUS 阶段），actual_len 保持 0，response_data 为空
-            }
-            else
-            {
-                // OUT 传输：通常不需要返回数据，但如果有数据（如控制传输的 OUT DATA 阶段），则需处理
-                // 这里假设 OUT 传输不需要返回数据负载，但 actual_length 应为实际发送的字节数
-                actual_len = trx->actual_num_bytes;
-            }
+        const bool has_data = (!callback_arg.is_out && data_len > 0); // 只有 IN 且有数据才发送负载
 
-            auto response = UsbIpResponse::UsbIpRetSubmit::create_ret_submit_with_status_and_no_iso(
+        if (has_data)
+        {
+            // IN 有数据：使用零拷贝发送
+            auto response = UsbIpResponse::UsbIpRetSubmit::create_ret_submit(
                 callback_arg.seqnum,
                 trxstat2error(trx->status),
-                response_data);
-
-            // 强制设置 actual_length
-            response.actual_length = actual_len;
-
-            // 对于 OUT 传输，确保没有多余数据
-            if (callback_arg.is_out)
-            {
-                // 如果 actual_len > 0 且 response_data 为空，需要确保协议发送正确
-                // create_ret_submit_with_status_and_no_iso 如果 response_data 为空，则不会发送数据负载
-                // 这样是可行的
-            }
-
+                0, 0,
+                UsbTransferPtr(trx), // 转移所有权
+                data_offset,
+                {});
+            response.actual_length = static_cast<uint32_t>(data_len);
+            callback_arg.handler.session.load()->submit_ret_submit(std::move(response));
+            // 注意：trx 已被 unique_ptr 接管，不能 free
+        }
+        else
+        {
+            // 无数据：包括 IN 的 STATUS 阶段（data_len == 0）和所有 OUT 传输
+            // 构造不带负载的响应，但 actual_length 需正确设置（尤其是 OUT）
+            UsbIpResponse::UsbIpRetSubmit response;
+            response.header = UsbIpHeaderBasic::get_server_header(USBIP_RET_SUBMIT, callback_arg.seqnum);
+            response.status = trxstat2error(trx->status);
+            response.actual_length = static_cast<uint32_t>(data_len);
+            response.start_frame = 0;
+            response.number_of_packets = 0;
+            response.error_count = 0;
+            response.transfer_buffer = nullptr;
+            response.usb_transfer = nullptr;
+            response.iso_packet_descriptor = {};
             callback_arg.handler.session.load()->submit_ret_submit(std::move(response));
             usb_host_transfer_free(trx);
         }
     }
     else if (should_send_response)
     {
+        // 被 unlink 的情况
         auto cmd_unlink_seqnum = std::get<1>(unlink_found);
-
         callback_arg.handler.session.load()->submit_ret_unlink_and_then_remove_seqnum_unlink(
             UsbIpResponse::UsbIpRetUnlink::create_ret_unlink(
                 cmd_unlink_seqnum,
                 trxstat2error(trx->status)),
             callback_arg.seqnum);
-
         usb_host_transfer_free(trx);
     }
     else
