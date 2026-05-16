@@ -4,8 +4,10 @@
 ![device](https://img.shields.io/badge/设备-ESP32S3-orange.svg)
 
 **一个基于开源项目 [usbipdcpp_esp32](https://github.com/yunsmall/usbipdcpp_esp32) 的增强版本，专注于优化和稳定 USB/IP 协议在 ESP32S3 上的数据传输。**
-![项目海报](./img/mt1.png)
 原项目实现了基础框架。本项目**着重解决了在实际应用中遇到的数据传输稳定性、兼容性和性能瓶颈问题**，旨在提供一个可用于更稳定场景的生产力工具或开发基础。
+
+![项目海报](./img/mt1.png)
+
 
 ## 📑 目录
 - [✨ 主要特性与增强](#-主要特性与增强)
