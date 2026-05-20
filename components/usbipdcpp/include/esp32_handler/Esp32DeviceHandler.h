@@ -76,13 +76,6 @@ namespace usbipdcpp
         esp_err_t tweak_set_configuration_cmd(const SetupPacket &setup_packet);
         esp_err_t tweak_reset_device_cmd(const SetupPacket &setup_packet);
 
-        /**
-         * @brief 返回是否做了特殊操作
-         * @param setup_packet
-         * @return
-         */
-        bool tweak_special_requests(const SetupPacket &setup_packet);
-
         static uint8_t get_esp32_transfer_flags(uint32_t in);
 
         static int trxstat2error(usb_transfer_status_t trxstat);

@@ -733,68 +733,6 @@ esp_err_t usbipdcpp::Esp32DeviceHandler::tweak_reset_device_cmd(const SetupPacke
     return ESP_OK;
 }
 
-bool usbipdcpp::Esp32DeviceHandler::tweak_special_requests(const SetupPacket &setup_packet)
-{
-    // 记录控制请求以便调试
-    SPDLOG_DEBUG("控制请求: bmRequestType={:02x}, bRequest={}, wValue={}, wIndex={}, wLength={}",
-                 setup_packet.request_type, setup_packet.request,
-                 setup_packet.value, setup_packet.index, setup_packet.length);
-
-    // 检查是否是标准设备请求
-    if ((setup_packet.request_type & 0x60) == 0)
-    { // 标准请求
-        switch (setup_packet.request)
-        {
-        case 0x01: // CLEAR_FEATURE
-            if (setup_packet.value == 0)
-            { // ENDPOINT_HALT
-                return tweak_clear_halt_cmd(setup_packet) == ESP_OK;
-            }
-            break;
-        case 0x0B: // SET_INTERFACE
-            // 对于U盘，set_interface通常是不需要的（只有一个接口设置）
-            // 但有些U盘可能需要它
-            SPDLOG_INFO("SET_INTERFACE请求: 接口={}, 备选设置={}",
-                        setup_packet.index, setup_packet.value);
-            // 返回false，让标准控制传输流程处理
-            return false;
-        case 0x09: // SET_CONFIGURATION
-            SPDLOG_INFO("SET_CONFIGURATION请求: 配置值={}", setup_packet.value);
-            // U盘通常只需要一个配置，直接返回成功
-            return true;
-        case 0x00: // GET_STATUS
-        case 0x02: // SET_FEATURE
-        case 0x03: // SET_ADDRESS
-        case 0x06: // GET_DESCRIPTOR
-        case 0x08: // GET_CONFIGURATION
-        case 0x0A: // GET_INTERFACE
-            // 这些请求应该由标准控制传输处理
-            return false;
-        default:
-            SPDLOG_WARN("未知的标准请求: {}", setup_packet.request);
-            return false;
-        }
-    }
-    /*
-        // 检查是否是类特定请求（U盘大容量存储类）
-        if ((setup_packet.request_type & 0x60) == 0x20)
-        { // 类特定请求
-            SPDLOG_DEBUG("类特定请求");
-            // 对于U盘，类特定请求应该由标准控制传输处理
-            return false;
-        }
-
-        // 检查是否是供应商特定请求
-        if ((setup_packet.request_type & 0x60) == 0x40)
-        { // 供应商特定请求
-            SPDLOG_DEBUG("供应商特定请求");
-            return false;
-        }
-    */
-    SPDLOG_DEBUG("不需要调整包");
-    return false;
-}
-
 uint8_t usbipdcpp::Esp32DeviceHandler::get_esp32_transfer_flags(uint32_t in)
 {
     uint8_t flags = 0;
