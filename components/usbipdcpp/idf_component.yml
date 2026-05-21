@@ -14,5 +14,4 @@ dependencies:
   #   # `public` flag doesn't have an effect dependencies of the `main` component.
   #   # All dependencies of `main` are public by default.
   #   public: true
-  javivilarroig/spdlog: ^1.14.1
   espressif/asio: ^1.32.0

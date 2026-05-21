@@ -1,4 +1,6 @@
 #include "VirtualDeviceHandler.h"
+#include <esp_log.h>
+static const char *TAG = "usbipdcpp_VirtualDeviceHandler";
 
 #include "VirtualInterfaceHandler.h"
 #include "Session.h"
@@ -59,7 +61,7 @@ void VirtualDeviceHandler::change_device_ep0_max_size_by_speed()
     {
     case UsbSpeed::Unknown:
     {
-        SPDLOG_WARN("Unknown device speed");
+        ESP_LOGW(TAG, "Unknown device speed");
         [[fallthrough]];
     }
     case UsbSpeed::Low:
@@ -83,7 +85,7 @@ void VirtualDeviceHandler::change_device_ep0_max_size_by_speed()
     }
     default:
     {
-        SPDLOG_WARN("invalid speed value");
+        ESP_LOGW(TAG, "invalid speed value");
         break;
     }
     }
@@ -110,7 +112,7 @@ void VirtualDeviceHandler::handle_control_urb(
             {
             case RequestRecipient::Device:
             {
-                SPDLOG_TRACE("发给设备");
+                ESP_LOGV(TAG, "发给设备");
                 auto std_request = static_cast<StandardRequest>(setup_packet.calc_standard_request());
 
                 if (setup_packet.is_out())
@@ -119,25 +121,25 @@ void VirtualDeviceHandler::handle_control_urb(
                     {
                     case StandardRequest::ClearFeature:
                     {
-                        SPDLOG_TRACE("设备ClearFeature");
+                        ESP_LOGV(TAG, "设备ClearFeature");
                         request_clear_feature(setup_packet.value, &status);
                         break;
                     }
                     case StandardRequest::SetAddress:
                     {
-                        SPDLOG_TRACE("设备SetAddress");
+                        ESP_LOGV(TAG, "设备SetAddress");
                         request_set_address(setup_packet.value, &status);
                         break;
                     }
                     case StandardRequest::SetConfiguration:
                     {
-                        SPDLOG_TRACE("设备SetConfiguration");
+                        ESP_LOGV(TAG, "设备SetConfiguration");
                         request_set_configuration(setup_packet.value, &status);
                         break;
                     }
                     case StandardRequest::SetDescriptor:
                     {
-                        SPDLOG_TRACE("设备SetDescriptor");
+                        ESP_LOGV(TAG, "设备SetDescriptor");
                         request_set_descriptor(setup_packet.value >> 8, setup_packet.value & 0x00FF,
                                                setup_packet.index,
                                                setup_packet.length, out_data, &status);
@@ -145,14 +147,14 @@ void VirtualDeviceHandler::handle_control_urb(
                     }
                     case StandardRequest::SetFeature:
                     {
-                        SPDLOG_TRACE("设备SetFeature");
+                        ESP_LOGV(TAG, "设备SetFeature");
                         request_set_feature(setup_packet.value, &status);
                         break;
                     }
                     default:
                     {
-                        SPDLOG_WARN("Device Unhandled StandardRequest {}",
-                                    static_cast<int>(std_request));
+                        ESP_LOGW(TAG, "Device Unhandled StandardRequest %d",
+                                 static_cast<int>(std_request));
                         status = static_cast<std::uint32_t>(UrbStatusType::StatusEPIPE);
                     }
                     }
@@ -168,14 +170,14 @@ void VirtualDeviceHandler::handle_control_urb(
                     {
                     case StandardRequest::GetConfiguration:
                     {
-                        SPDLOG_TRACE("设备GetConfiguration");
+                        ESP_LOGV(TAG, "设备GetConfiguration");
                         auto ret = request_get_configuration(&status);
                         vector_append_to_net(result, ret);
                         break;
                     }
                     case StandardRequest::GetDescriptor:
                     {
-                        SPDLOG_TRACE("设备GetDescriptor");
+                        ESP_LOGV(TAG, "设备GetDescriptor");
                         result = request_get_descriptor(setup_packet.value >> 8, setup_packet.value,
                                                         setup_packet.length, &status);
                         if (setup_packet.length < result.size())
@@ -186,14 +188,14 @@ void VirtualDeviceHandler::handle_control_urb(
                     }
                     case StandardRequest::GetStatus:
                     {
-                        SPDLOG_TRACE("设备GetStatus");
+                        ESP_LOGV(TAG, "设备GetStatus");
                         auto gotten_status = request_get_status(&status);
                         vector_append_to_net(result, gotten_status);
                         break;
                     }
                     default:
                     {
-                        SPDLOG_WARN("Device Unhandled StandardRequest {}", static_cast<int>(std_request));
+                        ESP_LOGW(TAG, "Device Unhandled StandardRequest %d", static_cast<int>(std_request));
                     }
                     }
                     session.load()->submit_ret_submit(
@@ -204,7 +206,7 @@ void VirtualDeviceHandler::handle_control_urb(
             }
             case RequestRecipient::Interface:
             {
-                SPDLOG_TRACE("发给接口");
+                ESP_LOGV(TAG, "发给接口");
                 auto intf_idx = setup_packet.index;
                 auto handler = handle_device.interfaces[intf_idx].handler;
                 if (handler)
@@ -216,26 +218,26 @@ void VirtualDeviceHandler::handle_control_urb(
                         {
                         case StandardRequest::ClearFeature:
                         {
-                            SPDLOG_TRACE("接口request_clear_feature");
+                            ESP_LOGV(TAG, "接口request_clear_feature");
                             handler->request_clear_feature(setup_packet.value, &status);
                             break;
                         }
                         case StandardRequest::SetFeature:
                         {
-                            SPDLOG_TRACE("接口request_set_feature");
+                            ESP_LOGV(TAG, "接口request_set_feature");
                             handler->request_set_feature(setup_packet.value, &status);
                             break;
                         }
                         case StandardRequest::SetInterface:
                         {
-                            SPDLOG_TRACE("接口request_set_interface");
+                            ESP_LOGV(TAG, "接口request_set_interface");
                             handler->request_set_interface(setup_packet.value, &status);
                             break;
                         }
                         default:
                         {
-                            SPDLOG_WARN("Interface Unhandled StandardRequest {}",
-                                        static_cast<int>(std_request));
+                            ESP_LOGW(TAG, "Interface Unhandled StandardRequest %d",
+                                     static_cast<int>(std_request));
                         }
                         }
                         session.load()->submit_ret_submit(
@@ -250,21 +252,21 @@ void VirtualDeviceHandler::handle_control_urb(
                         {
                         case StandardRequest::GetInterface:
                         {
-                            SPDLOG_TRACE("接口request_get_interface");
+                            ESP_LOGV(TAG, "接口request_get_interface");
                             auto ret = this->request_get_interface(setup_packet.index, &status);
                             vector_append_to_net(result, ret);
                             break;
                         }
                         case StandardRequest::GetStatus:
                         {
-                            SPDLOG_TRACE("接口request_get_status");
+                            ESP_LOGV(TAG, "接口request_get_status");
                             auto ret = handler->request_get_status(&status);
                             vector_append_to_net(result, ret);
                             break;
                         }
                         case StandardRequest::GetDescriptor:
                         {
-                            SPDLOG_TRACE("接口request_get_descriptor");
+                            ESP_LOGV(TAG, "接口request_get_descriptor");
                             result = handler->request_get_descriptor(
                                 setup_packet.value >> 8, setup_packet.value & 0x00FF,
                                 setup_packet.length, &status);
@@ -277,8 +279,8 @@ void VirtualDeviceHandler::handle_control_urb(
                         }
                         default:
                         {
-                            SPDLOG_WARN("Interface Unhandled StandardRequest {}",
-                                        static_cast<int>(std_request));
+                            ESP_LOGW(TAG, "Interface Unhandled StandardRequest %d",
+                                     static_cast<int>(std_request));
                         }
                         }
                         session.load()->submit_ret_submit(
@@ -288,7 +290,7 @@ void VirtualDeviceHandler::handle_control_urb(
                 }
                 else
                 {
-                    SPDLOG_ERROR("接口未注册handler，无法处理发去接口的信息");
+                    ESP_LOGE(TAG, "接口未注册handler，无法处理发去接口的信息");
                     ec = make_error_code(ErrorType::INVALID_ARG);
                     session.load()->submit_ret_submit(
                         UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
@@ -298,7 +300,7 @@ void VirtualDeviceHandler::handle_control_urb(
             }
             case RequestRecipient::Endpoint:
             {
-                SPDLOG_TRACE("发给端点");
+                ESP_LOGV(TAG, "发给端点");
                 auto find_ret = handle_device.find_ep(setup_packet.index);
                 if (find_ret)
                 {
@@ -316,23 +318,23 @@ void VirtualDeviceHandler::handle_control_urb(
                                 {
                                 case StandardRequest::ClearFeature:
                                 {
-                                    SPDLOG_TRACE("端点request_endpoint_clear_feature");
+                                    ESP_LOGV(TAG, "端点request_endpoint_clear_feature");
                                     handler->request_endpoint_clear_feature(
                                         setup_packet.value, setup_packet.index, &status);
                                     break;
                                 }
                                 case StandardRequest::SetFeature:
                                 {
-                                    SPDLOG_TRACE("端点request_endpoint_set_feature");
+                                    ESP_LOGV(TAG, "端点request_endpoint_set_feature");
                                     handler->request_endpoint_set_feature(
                                         setup_packet.value, setup_packet.index, &status);
                                     break;
                                 }
                                 default:
                                 {
-                                    SPDLOG_WARN("Endpoint {:04x} Unhandled StandardRequest {}",
-                                                setup_packet.index,
-                                                static_cast<int>(std_request));
+                                    ESP_LOGW(TAG, "Endpoint %04x Unhandled StandardRequest %d",
+                                             setup_packet.index,
+                                             static_cast<int>(std_request));
                                 }
                                 }
                                 session.load()->submit_ret_submit(
@@ -347,7 +349,7 @@ void VirtualDeviceHandler::handle_control_urb(
                                 {
                                 case StandardRequest::GetStatus:
                                 {
-                                    SPDLOG_TRACE("端点request_endpoint_get_status");
+                                    ESP_LOGV(TAG, "端点request_endpoint_get_status");
                                     auto gotten_status = handler->request_endpoint_get_status(
                                         setup_packet.index, &status);
                                     vector_append_to_net(result, gotten_status);
@@ -355,15 +357,15 @@ void VirtualDeviceHandler::handle_control_urb(
                                 }
                                 case StandardRequest::SynchFrame:
                                 {
-                                    SPDLOG_TRACE("端点request_endpoint_sync_frame");
+                                    ESP_LOGV(TAG, "端点request_endpoint_sync_frame");
                                     handler->request_endpoint_sync_frame(setup_packet.index, &status);
                                     break;
                                 }
                                 default:
                                 {
-                                    SPDLOG_WARN("Endpoint {:04x} Unhandled StandardRequest {}",
-                                                setup_packet.index,
-                                                static_cast<int>(std_request));
+                                    ESP_LOGW(TAG, "Endpoint %04x Unhandled StandardRequest %d",
+                                             setup_packet.index,
+                                             static_cast<int>(std_request));
                                 }
                                 }
                                 session.load()->submit_ret_submit(
@@ -375,7 +377,7 @@ void VirtualDeviceHandler::handle_control_urb(
                         }
                         else
                         {
-                            SPDLOG_ERROR("端点{:04x}所在的接口没注册对应handler", setup_packet.value);
+                            ESP_LOGE(TAG, "端点%04x所在的接口没注册对应handler", setup_packet.value);
                             ec = make_error_code(ErrorType::INVALID_ARG);
                             session.load()->submit_ret_submit(
                                 UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
@@ -384,7 +386,7 @@ void VirtualDeviceHandler::handle_control_urb(
                     }
                     else
                     {
-                        SPDLOG_ERROR("端点{:04x}没有对应的接口", setup_packet.value);
+                        ESP_LOGE(TAG, "端点%04x没有对应的接口", setup_packet.value);
                         ec = make_error_code(ErrorType::INVALID_ARG);
                         session.load()->submit_ret_submit(
                             UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
@@ -395,15 +397,15 @@ void VirtualDeviceHandler::handle_control_urb(
             }
             case RequestRecipient::Other:
             {
-                SPDLOG_TRACE("发给其他");
-                SPDLOG_WARN("未实现去其他地方的包");
+                ESP_LOGV(TAG, "发给其他");
+                ESP_LOGW(TAG, "未实现去其他地方的包");
                 session.load()->submit_ret_submit(
                     UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
                 break;
             }
             default:
             {
-                SPDLOG_WARN("未知去往目标");
+                ESP_LOGW(TAG, "未知去往目标");
                 session.load()->submit_ret_submit(
                     UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
             }
@@ -415,7 +417,7 @@ void VirtualDeviceHandler::handle_control_urb(
             {
             case RequestRecipient::Device:
             {
-                SPDLOG_TRACE("发给设备的非标准控制传输包");
+                ESP_LOGV(TAG, "发给设备的非标准控制传输包");
                 handle_non_standard_request_type_control_urb(seqnum, ep, transfer_flags,
                                                              transfer_buffer_length,
                                                              setup_packet,
@@ -424,7 +426,7 @@ void VirtualDeviceHandler::handle_control_urb(
             }
             case RequestRecipient::Interface:
             {
-                SPDLOG_TRACE("发给{}号接口的非标准控制传输包", setup_packet.index);
+                ESP_LOGV(TAG, "发给%u号接口的非标准控制传输包", setup_packet.index);
                 auto intf_idx = setup_packet.index;
                 auto handler = handle_device.interfaces[intf_idx].handler;
                 if (handler)
@@ -436,7 +438,7 @@ void VirtualDeviceHandler::handle_control_urb(
                 }
                 else
                 {
-                    SPDLOG_ERROR("接口未注册handler，无法处理发往接口的信息");
+                    ESP_LOGE(TAG, "接口未注册handler，无法处理发往接口的信息");
                     ec = make_error_code(ErrorType::INVALID_ARG);
                     session.load()->submit_ret_submit(
                         UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
@@ -446,7 +448,7 @@ void VirtualDeviceHandler::handle_control_urb(
             }
             case RequestRecipient::Endpoint:
             {
-                SPDLOG_TRACE("发给{}号接口的{:04x}号地址端口的非标准控制传输包", setup_packet.index, ep.address);
+                ESP_LOGV(TAG, "发给%u号接口的%04x号地址端口的非标准控制传输包", setup_packet.index, ep.address);
                 auto intf_idx = setup_packet.index;
                 auto handler = handle_device.interfaces[intf_idx].handler;
                 if (handler)
@@ -459,7 +461,7 @@ void VirtualDeviceHandler::handle_control_urb(
                 }
                 else
                 {
-                    SPDLOG_ERROR("接口未注册handler，无法处理发往接口的信息");
+                    ESP_LOGE(TAG, "接口未注册handler，无法处理发往接口的信息");
                     ec = make_error_code(ErrorType::INVALID_ARG);
                     session.load()->submit_ret_submit(
                         UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
@@ -469,14 +471,14 @@ void VirtualDeviceHandler::handle_control_urb(
             }
             case RequestRecipient::Other:
             {
-                SPDLOG_WARN("未实现去其他地方的包");
+                ESP_LOGW(TAG, "未实现去其他地方的包");
                 session.load()->submit_ret_submit(
                     UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
                 break;
             }
             default:
             {
-                SPDLOG_WARN("未知去往目标");
+                ESP_LOGW(TAG, "未知去往目标");
                 session.load()->submit_ret_submit(
                     UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
             }
@@ -516,7 +518,7 @@ void VirtualDeviceHandler::handle_bulk_transfer(
         }
         else
         {
-            SPDLOG_ERROR("端点{:04x}所在的接口没注册handler", ep.address);
+            ESP_LOGE(TAG, "端点%04x所在的接口没注册handler", ep.address);
             session.load()->submit_ret_submit(
                 UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
         }
@@ -555,7 +557,7 @@ void VirtualDeviceHandler::handle_interrupt_transfer(
         }
         else
         {
-            SPDLOG_ERROR("端点{:04x}所在的接口没注册handler", ep.address);
+            ESP_LOGE(TAG, "端点%04x所在的接口没注册handler", ep.address);
             session.load()->submit_ret_submit(
                 UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
         }
@@ -596,7 +598,7 @@ void VirtualDeviceHandler::handle_isochronous_transfer(
         }
         else
         {
-            SPDLOG_ERROR("端点{:04x}所在的接口没注册handler", ep.address);
+            ESP_LOGE(TAG, "端点%04x所在的接口没注册handler", ep.address);
             session.load()->submit_ret_submit(
                 UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
         }
@@ -623,43 +625,43 @@ data_type VirtualDeviceHandler::request_get_descriptor(std::uint8_t type, std::u
     {
     case DescriptorType::Device:
     {
-        SPDLOG_TRACE("设备get_device_descriptor");
+        ESP_LOGV(TAG, "设备get_device_descriptor");
         return get_device_descriptor(language_id, descriptor_length, p_status);
         break;
     }
     case DescriptorType::Configuration:
     {
-        SPDLOG_TRACE("设备get_configuration_descriptor");
+        ESP_LOGV(TAG, "设备get_configuration_descriptor");
         return get_configuration_descriptor(language_id, descriptor_length, p_status);
         break;
     }
     case DescriptorType::DeviceQualifier:
     {
-        SPDLOG_TRACE("设备get_device_qualifier_descriptor");
+        ESP_LOGV(TAG, "设备get_device_qualifier_descriptor");
         return get_device_qualifier_descriptor(language_id, descriptor_length, p_status);
         break;
     }
     case DescriptorType::BOS:
     {
-        SPDLOG_TRACE("设备get_bos_descriptor");
+        ESP_LOGV(TAG, "设备get_bos_descriptor");
         return get_bos_descriptor(language_id, descriptor_length, p_status);
         break;
     }
     case DescriptorType::String:
     {
-        SPDLOG_TRACE("设备get_string_descriptor");
+        ESP_LOGV(TAG, "设备get_string_descriptor");
         return get_string_descriptor(language_id, descriptor_length, p_status);
         break;
     }
     case DescriptorType::OtherSpeedConfiguration:
     {
-        SPDLOG_TRACE("设备get_other_speed_descriptor");
+        ESP_LOGV(TAG, "设备get_other_speed_descriptor");
         return get_other_speed_descriptor(language_id, descriptor_length, p_status);
         break;
     }
     default:
     {
-        SPDLOG_INFO("请求非标准描述符 {:08b}", type);
+        ESP_LOGI(TAG, "请求非标准描述符 %u", type);
         return get_custom_descriptor(type, language_id, descriptor_length, p_status);
     }
     }
@@ -674,7 +676,7 @@ std::uint8_t VirtualDeviceHandler::request_get_interface(std::uint16_t intf, std
     }
     else
     {
-        SPDLOG_ERROR("接口未注册handler，无法处理");
+        ESP_LOGE(TAG, "接口未注册handler，无法处理");
         *p_status = static_cast<std::uint32_t>(UrbStatusType::StatusEPIPE);
         return -1;
     }
@@ -690,7 +692,7 @@ void VirtualDeviceHandler::request_set_interface(std::uint16_t alternate_setting
     }
     else
     {
-        SPDLOG_ERROR("接口未注册handler，无法处理");
+        ESP_LOGE(TAG, "接口未注册handler，无法处理");
         *p_status = static_cast<std::uint32_t>(UrbStatusType::StatusEPIPE);
         return;
     }
@@ -837,7 +839,7 @@ data_type VirtualDeviceHandler::get_string_descriptor(std::uint8_t language_id, 
     }
     else
     {
-        SPDLOG_ERROR("非法字符串描述符索引：{}", language_id);
+        ESP_LOGE(TAG, "非法字符串描述符索引：%u", language_id);
         *p_status = static_cast<std::uint32_t>(UrbStatusType::StatusEPIPE);
         return {};
     }

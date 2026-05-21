@@ -15,4 +15,3 @@ dependencies:
   #   # All dependencies of `main` are public by default.
   #   public: true
   espressif/asio: ^1.32.0
-  javivilarroig/spdlog: ^1.14.1

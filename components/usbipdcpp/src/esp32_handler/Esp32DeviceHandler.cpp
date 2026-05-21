@@ -1,4 +1,5 @@
 #include "Esp32DeviceHandler.h"
+static const char *TAG = "Esp32DeviceHandler";
 
 #include "sdkconfig.h"
 #include <esp_log.h>
@@ -36,12 +37,12 @@ void usbipdcpp::Esp32DeviceHandler::on_disconnection(error_code &ec)
     all_transfer_should_stop = true;
     if (!has_device)
     {
-        SPDLOG_WARN("没有设备，不需要停止传输");
+        ESP_LOGW(TAG, "没有设备，不需要停止传输");
         session = nullptr;
         return;
     }
     cancel_all_transfer();
-    spdlog::info("成功取消所有传输");
+    ESP_LOGI(TAG, "成功取消所有传输");
     transfer_tracker_.clear();
     session = nullptr;
 }
@@ -70,15 +71,15 @@ void usbipdcpp::Esp32DeviceHandler::handle_control_urb(
         return;
     }
 
-    SPDLOG_DEBUG("控制请求: bmRequestType={:02x}, bRequest={}, wValue={}, wIndex={}, wLength={}",
-                 setup_packet.request_type, setup_packet.request,
-                 setup_packet.value, setup_packet.index, setup_packet.length);
+    ESP_LOGD(TAG, "控制请求: bmRequestType=0x%02x, bRequest=%u, wValue=%u, wIndex=%u, wLength=%u",
+             setup_packet.request_type, setup_packet.request,
+             setup_packet.value, setup_packet.index, setup_packet.length);
 
     usb_transfer_t *transfer = nullptr;
     auto err = usb_host_transfer_alloc(USB_SETUP_PACKET_SIZE + transfer_buffer_length, 0, &transfer);
     if (err != ESP_OK)
     {
-        SPDLOG_ERROR("无法申请transfer: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "无法申请transfer: %s", esp_err_to_name(err));
         ec = make_error_code(ErrorType::TRANSFER_ERROR);
         return;
     }
@@ -100,7 +101,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_control_urb(
         }
         else
         {
-            SPDLOG_WARN("控制OUT数据大小{}超过缓冲区大小{}", req.size(), transfer_buffer_length);
+            ESP_LOGW(TAG, "控制OUT数据大小%zu超过缓冲区大小%u", req.size(), transfer_buffer_length);
         }
     }
 
@@ -114,7 +115,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_control_urb(
 
     if (!callback_args)
     {
-        SPDLOG_ERROR("无法分配callback_args内存");
+        ESP_LOGE(TAG, "无法分配callback_args内存");
         usb_host_transfer_free(transfer);
         ec = make_error_code(ErrorType::TRANSFER_ERROR);
         return;
@@ -129,7 +130,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_control_urb(
 
     if (!transfer_tracker_.register_transfer(seqnum, transfer, ep.address))
     {
-        SPDLOG_ERROR("无法注册转移，并发数超过限制");
+        ESP_LOGE(TAG, "无法注册转移，并发数超过限制");
         usb_host_transfer_free(transfer);
         delete callback_args;
         session.load()->submit_ret_submit(
@@ -140,7 +141,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_control_urb(
     err = usb_host_transfer_submit_control(host_client_handle, transfer);
     if (err != ESP_OK)
     {
-        SPDLOG_ERROR("transfer提交失败: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "transfer提交失败: %s", esp_err_to_name(err));
         transfer_tracker_.remove(seqnum);
         usb_host_transfer_free(transfer);
         delete callback_args;
@@ -194,7 +195,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
     // 如果传输请求大于单次最大值，则仍然尽量异步并行提交多个 transfer，此路径应当很少触发
     if (!is_out && transfer_buffer_length > MAX_TRANSFER_SIZE)
     {
-        SPDLOG_WARN("请求长度 {} 超过 MAX_TRANSFER_SIZE={}，将并行拆分", transfer_buffer_length, MAX_TRANSFER_SIZE);
+        ESP_LOGW(TAG, "请求长度 %u 超过 MAX_TRANSFER_SIZE=%zu，将并行拆分", transfer_buffer_length, MAX_TRANSFER_SIZE);
         size_t remaining = transfer_buffer_length;
         auto aggregated = std::make_shared<data_type>();
         try
@@ -203,7 +204,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
         }
         catch (...)
         {
-            SPDLOG_ERROR("无法为aggregated分配内存, size=%u, heap=%d", transfer_buffer_length, esp_get_free_heap_size());
+            ESP_LOGE(TAG, "无法为aggregated分配内存, size=%u, heap=%d", transfer_buffer_length, esp_get_free_heap_size());
             session.load()->submit_ret_submit(
                 UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
             return;
@@ -241,7 +242,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
             esp_err_t aerr = usb_host_transfer_alloc(submit_len, 0, &chunk_tr);
             if (aerr != ESP_OK)
             {
-                SPDLOG_ERROR("chunk transfer alloc 失败: {}", esp_err_to_name(aerr));
+                ESP_LOGE(TAG, "chunk transfer alloc 失败: %s", esp_err_to_name(aerr));
                 session.load()->submit_ret_submit(
                     UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
                 all_chunks_submitted_successfully = false;
@@ -307,7 +308,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
             }
             if (aerr != ESP_OK)
             {
-                SPDLOG_ERROR("chunk transfer 提交失败: %s", esp_err_to_name(aerr));
+                ESP_LOGE(TAG, "chunk transfer 提交失败: %s", esp_err_to_name(aerr));
                 usb_host_transfer_free(chunk_tr);
                 session.load()->submit_ret_submit(
                     UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
@@ -374,7 +375,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_bulk_transfer(
 
     if (!transfer_tracker_.register_transfer(seqnum, transfer, ep.address))
     {
-        SPDLOG_ERROR("无法注册转移，并发数超过限制");
+        ESP_LOGE(TAG, "无法注册转移，并发数超过限制");
         usb_host_transfer_free(transfer);
         delete callback_args;
         session.load()->submit_ret_submit(
@@ -440,7 +441,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_interrupt_transfer(std::uint32_t seqn
 
     bool is_out = !ep.is_in();
 
-    SPDLOG_DEBUG("中断传输 {}，ep addr: {:02x}", is_out ? "Out" : "In", ep.address);
+    ESP_LOGD(TAG, "中断传输 %s，ep addr: %02x", is_out ? "Out" : "In", ep.address);
     usb_transfer_t *transfer = nullptr;
 
     // 对于IN传输，ESP32 USB Host 要求 num_bytes 为最大包大小的整数倍，
@@ -458,7 +459,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_interrupt_transfer(std::uint32_t seqn
     {
         if (err != ESP_OK)
         {
-            SPDLOG_ERROR("无法申请transfer");
+            ESP_LOGE(TAG, "无法申请transfer");
             return;
         }
         if (is_out)
@@ -481,7 +482,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_interrupt_transfer(std::uint32_t seqn
 
         if (!transfer_tracker_.register_transfer(seqnum, transfer, ep.address))
         {
-            SPDLOG_ERROR("无法注册转移，并发数超过限制");
+            ESP_LOGE(TAG, "无法注册转移，并发数超过限制");
             usb_host_transfer_free(transfer);
             delete callback_args;
             goto error_occurred;
@@ -491,7 +492,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_interrupt_transfer(std::uint32_t seqn
 
         if (err != ESP_OK)
         {
-            SPDLOG_ERROR("transfer提交失败");
+            ESP_LOGE(TAG, "transfer提交失败");
             transfer_tracker_.remove(seqnum);
             usb_host_transfer_free(transfer);
             delete callback_args;
@@ -500,7 +501,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_interrupt_transfer(std::uint32_t seqn
     }
     return;
 error_occurred:
-    SPDLOG_ERROR("中断传输失败，{}", esp_err_to_name(err));
+    ESP_LOGE(TAG, "中断传输失败，%s", esp_err_to_name(err));
     // 不认为是错误，让服务器重置
     //  ec = make_error_code(ErrorType::TRANSFER_ERROR);
     session.load()->submit_ret_submit(
@@ -525,14 +526,14 @@ void usbipdcpp::Esp32DeviceHandler::handle_isochronous_transfer(
     }
 
     bool is_out = !ep.is_in();
-    SPDLOG_DEBUG("同步传输 {}，ep addr: {:02x}", is_out ? "Out" : "In", ep.address);
+    ESP_LOGD(TAG, "同步传输 %s，ep addr: %02x", is_out ? "Out" : "In", ep.address);
 
     usb_transfer_t *transfer = nullptr;
     auto err = usb_host_transfer_alloc(transfer_buffer_length, iso_packet_descriptors.size(), &transfer);
     {
         if (err != ESP_OK)
         {
-            SPDLOG_ERROR("无法申请transfer");
+            ESP_LOGE(TAG, "无法申请transfer");
             ec = make_error_code(ErrorType::TRANSFER_ERROR);
             return;
         }
@@ -568,7 +569,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_isochronous_transfer(
 
         if (!transfer_tracker_.register_transfer(seqnum, transfer, ep.address))
         {
-            SPDLOG_ERROR("无法注册转移，并发数超过限制");
+            ESP_LOGE(TAG, "无法注册转移，并发数超过限制");
             usb_host_transfer_free(transfer);
             delete callback_args;
             goto error_occurred;
@@ -577,7 +578,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_isochronous_transfer(
         err = usb_host_transfer_submit(transfer);
         if (err < 0)
         {
-            SPDLOG_ERROR("transfer提交失败");
+            ESP_LOGE(TAG, "transfer提交失败");
             transfer_tracker_.remove(seqnum);
             usb_host_transfer_free(transfer);
             delete callback_args;
@@ -586,7 +587,7 @@ void usbipdcpp::Esp32DeviceHandler::handle_isochronous_transfer(
     }
     return;
 error_occurred:
-    SPDLOG_ERROR("同步传输失败，{}", esp_err_to_name(err));
+    ESP_LOGE(TAG, "同步传输失败，%s", esp_err_to_name(err));
     session.load()->submit_ret_submit(
         UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(seqnum));
 }
@@ -630,8 +631,8 @@ void usbipdcpp::Esp32DeviceHandler::cancel_endpoint_all_transfers(uint8_t bEndpo
     err = usb_host_endpoint_clear(native_handle, bEndpointAddress);
     if (err != ESP_OK)
     {
-        SPDLOG_WARN("usb_host_endpoint_clear address {} failed: {}",
-                    bEndpointAddress, esp_err_to_name(err));
+        ESP_LOGW(TAG, "usb_host_endpoint_clear address %u failed: %s",
+                 bEndpointAddress, esp_err_to_name(err));
     }
 
     // 延迟后重置端点
@@ -644,7 +645,7 @@ esp_err_t usbipdcpp::Esp32DeviceHandler::sync_control_transfer(const SetupPacket
     auto err = usb_host_transfer_alloc(USB_SETUP_PACKET_SIZE + setup_packet.length, 0, &transfer);
     if (err != ESP_OK)
     {
-        SPDLOG_ERROR("无法申请transfer: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "无法申请transfer: %s", esp_err_to_name(err));
         return err;
     }
 
@@ -670,7 +671,7 @@ esp_err_t usbipdcpp::Esp32DeviceHandler::sync_control_transfer(const SetupPacket
     err = usb_host_transfer_submit_control(host_client_handle, transfer);
     if (err != ESP_OK)
     {
-        SPDLOG_ERROR("sync_control_transfer 提交失败: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "sync_control_transfer 提交失败: %s", esp_err_to_name(err));
         usb_host_transfer_free(transfer);
         return err;
     }
@@ -686,12 +687,12 @@ esp_err_t usbipdcpp::Esp32DeviceHandler::sync_control_transfer(const SetupPacket
 esp_err_t usbipdcpp::Esp32DeviceHandler::tweak_clear_halt_cmd(const SetupPacket &setup_packet)
 {
     auto target_endp = setup_packet.index;
-    SPDLOG_DEBUG("tweak_clear_halt_cmd");
+    ESP_LOGD(TAG, "tweak_clear_halt_cmd");
 
     auto err = usb_host_endpoint_clear(native_handle, target_endp);
     if (err != ESP_OK)
     {
-        SPDLOG_ERROR("tweak_clear_halt_cmd usb_host_endpoint_clear error: {}", esp_err_to_name(err));
+        ESP_LOGE(TAG, "tweak_clear_halt_cmd usb_host_endpoint_clear error: %s", esp_err_to_name(err));
         return err;
     }
     return ESP_OK;
@@ -704,7 +705,7 @@ esp_err_t usbipdcpp::Esp32DeviceHandler::tweak_set_interface_cmd(const SetupPack
     auto err = sync_control_transfer(setup_packet);
     if (err != ESP_OK)
     {
-        SPDLOG_ERROR("error occurred in tweak_set_interface_cmd:{}", esp_err_to_name(err));
+        ESP_LOGE(TAG, "error occurred in tweak_set_interface_cmd:%s", esp_err_to_name(err));
         return err;
     }
     return ESP_OK;
@@ -712,7 +713,7 @@ esp_err_t usbipdcpp::Esp32DeviceHandler::tweak_set_interface_cmd(const SetupPack
 
 esp_err_t usbipdcpp::Esp32DeviceHandler::tweak_set_configuration_cmd(const SetupPacket &setup_packet)
 {
-    SPDLOG_DEBUG("tweak_set_configuration_cmd");
+    ESP_LOGD(TAG, "tweak_set_configuration_cmd");
 
     // 不可以set_configuration，会device_busy
     // 就当执行过了
@@ -721,13 +722,13 @@ esp_err_t usbipdcpp::Esp32DeviceHandler::tweak_set_configuration_cmd(const Setup
 
 esp_err_t usbipdcpp::Esp32DeviceHandler::tweak_reset_device_cmd(const SetupPacket &setup_packet)
 {
-    SPDLOG_DEBUG("tweak_reset_device_cmd");
+    ESP_LOGD(TAG, "tweak_reset_device_cmd");
 
     // 使用sync_control_transfer实际执行控制传输
     auto err = sync_control_transfer(setup_packet);
     if (err != ESP_OK)
     {
-        SPDLOG_ERROR("error occurred in tweak_reset_device_cmd:{}", esp_err_to_name(err));
+        ESP_LOGE(TAG, "error occurred in tweak_reset_device_cmd:%s", esp_err_to_name(err));
         return err;
     }
     return ESP_OK;
@@ -827,7 +828,7 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
     case USB_TRANSFER_STATUS_COMPLETED:
         break;
     case USB_TRANSFER_STATUS_ERROR:
-        SPDLOG_WARN("传输错误，端点: {:02x}", trx->bEndpointAddress);
+        ESP_LOGW(TAG, "传输错误，端点: %02x", trx->bEndpointAddress);
         break;
     case USB_TRANSFER_STATUS_CANCELED:
     {
@@ -848,7 +849,7 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
             }
             if (err != ESP_OK)
             {
-                SPDLOG_ERROR("重新提交失败 seq={}: {}", callback_arg.seqnum, esp_err_to_name(err));
+                ESP_LOGE(TAG, "重新提交失败 seq=%u: %s", callback_arg.seqnum, esp_err_to_name(err));
                 callback_arg.handler.session.load()->submit_ret_submit(
                     UsbIpResponse::UsbIpRetSubmit::create_ret_submit_epipe_without_data(callback_arg.seqnum));
             }
@@ -860,20 +861,20 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
         break;
     }
     case USB_TRANSFER_STATUS_STALL:
-        SPDLOG_ERROR("端点 {:02x} 被STALL", trx->bEndpointAddress);
+        ESP_LOGE(TAG, "端点 %02x 被STALL", trx->bEndpointAddress);
         break;
     case USB_TRANSFER_STATUS_NO_DEVICE:
         callback_arg.handler.has_device = false;
-        SPDLOG_INFO("设备已移除");
+        ESP_LOGI(TAG, "设备已移除");
         break;
     case USB_TRANSFER_STATUS_TIMED_OUT:
-        SPDLOG_WARN("传输超时，端点: {:02x}", trx->bEndpointAddress);
+        ESP_LOGW(TAG, "传输超时，端点: %02x", trx->bEndpointAddress);
         break;
     case USB_TRANSFER_STATUS_OVERFLOW:
-        SPDLOG_WARN("传输溢出，端点: {:02x}", trx->bEndpointAddress);
+        ESP_LOGW(TAG, "传输溢出，端点: %02x", trx->bEndpointAddress);
         break;
     default:
-        SPDLOG_WARN("未知的传输状态 {}", (int)trx->status);
+        ESP_LOGW(TAG, "未知的传输状态 %d", (int)trx->status);
         break;
     }
 

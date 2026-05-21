@@ -6,13 +6,13 @@
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/redirect_error.hpp>
-#include <spdlog/spdlog.h>
+#include <esp_log.h>
 
 #include "utils.h"
 #include "protocol.h"
 #include "type.h"
 #include "Session.h"
-
+static const char *TAG = "usbipdcpp_Server";
 usbipdcpp::Server::Server(std::vector<UsbDevice> &&devices)
 {
     available_devices.reserve(devices.size());
@@ -33,14 +33,14 @@ void usbipdcpp::Server::start(asio::ip::tcp::endpoint &ep)
 
             acceptor.bind(ep);
             acceptor.listen();
-            spdlog::info("Listening on {}:{}", ep.address().to_string(), ep.port());
+            ESP_LOGI(TAG, "Listening on %s:%d", ep.address().to_string().c_str(), ep.port());
             asio::co_spawn(
                     asio_io_context,
                     do_accept(acceptor),
                     if_has_value_than_rethrow);
             asio_io_context.run();
         } catch (const std::exception &e) {
-            SPDLOG_ERROR("An unexpected exception occurs in network thread: {}", e.what());
+            ESP_LOGE(TAG, "An unexpected exception occurs in network thread: %s", e.what());
             std::exit(1);
         } });
 }
@@ -70,16 +70,16 @@ void usbipdcpp::Server::stop()
             alive_session_count = sessions.size();
         }
         auto wait_duration = std::chrono::seconds(1);
-        spdlog::info("There are still {} sessions that have not been closed, wait for {} seconds.",
-                     alive_session_count, wait_duration.count());
+        ESP_LOGI(TAG, "There are still %d sessions that have not been closed, wait for %d seconds.",
+                 alive_session_count, wait_duration.count());
         std::this_thread::sleep_for(wait_duration);
     }
-    spdlog::info("All sessions were successfully closed");
+    ESP_LOGI(TAG, "All sessions were successfully closed");
 
-    // spdlog::info("Successfully shut down transmissions for all devices");
+    // ESP_LOGI(TAG, "Successfully shut down transmissions for all devices");
 
     asio_io_context.stop();
-    SPDLOG_TRACE("Successfully stop io_context");
+    ESP_LOGD(TAG, "Successfully stop io_context");
     should_stop = true;
     network_io_thread.join();
 }
@@ -115,21 +115,20 @@ void usbipdcpp::Server::print_bound_devices()
     std::shared_lock lock(devices_mutex);
 
     std::size_t device_index = 1;
-    std::cout << "available devices:" << std::endl;
+    ESP_LOGD(TAG, "available devices:");
     for (auto &device : available_devices)
     {
-        std::cout << std::format("\tNo.{} device {}\n", device_index, device->busid);
+        ESP_LOGD(TAG, "\tNo.%zu device %s", device_index, device->busid.c_str());
         ++device_index;
     }
-    std::cout << '\n';
     device_index = 1;
-    std::cout << "using devices:" << std::endl;
+    ESP_LOGD(TAG, "using devices:");
     for (auto &device : using_devices)
     {
-        std::cout << std::format("\tNo.{} device {}\n", device_index, device.first);
+        ESP_LOGD(TAG, "\tNo.%zu device %s", device_index, device.first.c_str());
         ++device_index;
     }
-    std::cout << std::endl;
+    ESP_LOGD(TAG, "");
 }
 
 void usbipdcpp::Server::register_session_exit_callback(std::function<void()> &&callback)
@@ -137,24 +136,6 @@ void usbipdcpp::Server::register_session_exit_callback(std::function<void()> &&c
     std::lock_guard lock(session_list_mutex);
     session_exit_callbacks.emplace_back(std::move(callback));
 }
-
-// bool usbipdcpp::Server::remove_device(const std::string &busid) {
-//     std::lock_guard lock(devices_mutex);
-//     for (auto it = available_devices.begin(); it != available_devices.end(); ++it) {
-//         if ((*it)->busid == busid) {
-//             available_devices.erase(it);
-//             return true;
-//         }
-//     }
-//     for (auto it = using_devices.begin(); it != using_devices.end(); ++it) {
-//         if (it->first == busid) {
-//             SPDLOG_ERROR("{} is being used and can't be removed");
-//             return false;
-//         }
-//     }
-//     SPDLOG_ERROR("Can't find device {}");
-//     return false;
-// }
 
 void usbipdcpp::Server::on_session_exit()
 {
@@ -171,11 +152,11 @@ asio::awaitable<void> usbipdcpp::Server::do_accept(asio::ip::tcp::acceptor &acce
     {
         if (should_stop)
         {
-            SPDLOG_INFO("Server stopping, exit accept loop");
+            ESP_LOGI(TAG, "Server stopping, exit accept loop");
             co_return;
         }
 
-        SPDLOG_INFO("Waiting for a new connection...");
+        ESP_LOGI(TAG, "Waiting for a new connection...");
 
         // 先创建一个Session，同时内部创建一个自己的socket
         auto session = std::make_shared<Session>(*this);
@@ -193,11 +174,11 @@ asio::awaitable<void> usbipdcpp::Server::do_accept(asio::ip::tcp::acceptor &acce
                 session->socket.set_option(asio::ip::tcp::no_delay(true), set_ec);
                 if (set_ec)
                 {
-                    SPDLOG_WARN("Failed to set TCP_NODELAY: {}", set_ec.message());
+                    ESP_LOGW(TAG, "Failed to set TCP_NODELAY: %s", set_ec.message().c_str());
                 }
                 else
                 {
-                    SPDLOG_INFO("TCP_NODELAY set successfully");
+                    ESP_LOGI(TAG, "TCP_NODELAY set successfully");
                 }
             }
 
@@ -210,7 +191,7 @@ asio::awaitable<void> usbipdcpp::Server::do_accept(asio::ip::tcp::acceptor &acce
             auto remote_endpoint_name = std::format("{}:{}",
                                                     remote_endpoint.address().to_string(),
                                                     remote_endpoint.port());
-            spdlog::info("A new connection from {}", remote_endpoint_name);
+            ESP_LOGI(TAG, "A new connection from %s", remote_endpoint_name.c_str());
 
             // 函数会直接返回，但内部获取了自身的shared_ptr因此不会被析构
             // 每个session启动一个线程，防止某些必须阻塞的操作影响其他设备
@@ -218,12 +199,12 @@ asio::awaitable<void> usbipdcpp::Server::do_accept(asio::ip::tcp::acceptor &acce
         }
         else if (ec == asio::error::operation_aborted)
         {
-            SPDLOG_INFO("Operation aborted：{}", ec.message());
+            ESP_LOGI(TAG, "Operation aborted：%s", ec.message().c_str());
             break;
         }
         else
         {
-            SPDLOG_ERROR("Connection error：{}", ec.message());
+            ESP_LOGE(TAG, "Connection error：%s", ec.message().c_str());
         }
     }
 }
@@ -237,21 +218,21 @@ bool usbipdcpp::Server::is_device_using(const std::string &busid)
 void usbipdcpp::Server::try_moving_device_to_available(const std::string &busid)
 {
     print_devices();
-    SPDLOG_INFO("尝试将{}转移到可用设备中", busid);
+    ESP_LOGI(TAG, "尝试将%s转移到可用设备中", busid.c_str());
     std::lock_guard lock(devices_mutex);
-    // SPDLOG_TRACE("成功获得两个锁");
+    // ESP_LOGD(TAG, "成功获得两个锁");
 
     auto ret = using_devices.find(busid);
     if (ret != using_devices.end())
     {
-        SPDLOG_INFO("成功将{}转移到可用设备中", busid);
+        ESP_LOGI(TAG, "成功将%s转移到可用设备中", busid.c_str());
         auto &dev = ret->second;
         available_devices.emplace_back(std::move(dev));
         using_devices.erase(busid);
     }
     else
     {
-        SPDLOG_WARN("找不到busid为{}的设备", busid);
+        ESP_LOGW(TAG, "找不到busid为%s的设备", busid.c_str());
     }
 }
 
@@ -264,7 +245,7 @@ std::shared_ptr<usbipdcpp::UsbDevice> usbipdcpp::Server::try_moving_device_to_us
         // 找到设备
         if (wanted_busid == (*i)->busid)
         {
-            SPDLOG_INFO("将{}放入正在使用的设备中", wanted_busid);
+            ESP_LOGI(TAG, "将%s放入正在使用的设备中", wanted_busid.c_str());
             // 将想要的设备放入正在使用的设备
             auto ret = (using_devices[wanted_busid] = std::move(*i));
             // 删掉可用设备中的这个设备
@@ -272,17 +253,17 @@ std::shared_ptr<usbipdcpp::UsbDevice> usbipdcpp::Server::try_moving_device_to_us
             return ret;
         }
     }
-    SPDLOG_WARN("找不到busid为{}的设备", wanted_busid);
+    ESP_LOGW(TAG, "找不到busid为%s的设备", wanted_busid.c_str());
     return nullptr;
 }
 
 void usbipdcpp::Server::print_devices()
 {
     std::shared_lock guard(devices_mutex);
-    spdlog::debug("有{}个可用设备", available_devices.size());
-    spdlog::debug("有{}个正在使用的设备，分别为", using_devices.size());
+    ESP_LOGD(TAG, "有%d个可用设备", static_cast<int>(available_devices.size()));
+    ESP_LOGD(TAG, "有%d个正在使用的设备，分别为", static_cast<int>(using_devices.size()));
     for (auto &dev : using_devices)
     {
-        spdlog::debug("{}", dev.first);
+        ESP_LOGD(TAG, "%s", dev.first.c_str());
     }
 }

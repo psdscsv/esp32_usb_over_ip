@@ -2,7 +2,7 @@
 
 #include <iostream>
 #include <asio.hpp>
-#include <spdlog/spdlog.h>
+#include <esp_log.h>
 #include <nvs_flash.h>
 #include <esp_log.h>
 #include <esp_system.h>
@@ -164,9 +164,6 @@ void UsbipServer::thread_main()
 
     // 初始化所有系统
     init_server();
-
-    // 设置spdlog日志级别
-    spdlog::set_level(spdlog::level::trace);
 
     // 创建服务器实例
     server = std::make_unique<usbipdcpp::Esp32Server>();

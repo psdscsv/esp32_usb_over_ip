@@ -6,7 +6,6 @@ idf_component_register(
     REQUIRES
         sock_utils 
         asio
-        spdlog
         nvs_flash
         pthread
         usb
@@ -16,7 +15,5 @@ idf_component_register(
 )
 
 add_compile_definitions(
-    # SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE
-    SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO
     NDEBUG
 )

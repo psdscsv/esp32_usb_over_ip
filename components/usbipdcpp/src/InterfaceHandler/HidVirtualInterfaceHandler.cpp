@@ -1,4 +1,6 @@
 #include "HidVirtualInterfaceHandler.h"
+#include <esp_log.h>
+static const char *TAG = "usbipdcpp_HidVirtualInterfaceHandler";
 
 #include "constant.h"
 #include "Session.h"
@@ -47,7 +49,7 @@ void usbipdcpp::HidVirtualInterfaceHandler::handle_non_standard_request_type_con
             }
             default:
             {
-                SPDLOG_ERROR("Unknown HID request 0x{:x}", setup_packet.request);
+                ESP_LOGE(TAG, "Unknown HID request 0x%x", setup_packet.request);
                 status = static_cast<std::uint32_t>(UrbStatusType::StatusEPIPE);
             }
             }
@@ -77,7 +79,7 @@ void usbipdcpp::HidVirtualInterfaceHandler::handle_non_standard_request_type_con
             }
             default:
             {
-                SPDLOG_ERROR("Unknown HID request 0x{:x}", setup_packet.request);
+                ESP_LOGE(TAG, "Unknown HID request 0x%x", setup_packet.request);
                 status = static_cast<std::uint32_t>(UrbStatusType::StatusEPIPE);
             }
             }
@@ -107,7 +109,7 @@ usbipdcpp::data_type usbipdcpp::HidVirtualInterfaceHandler::request_get_descript
     }
     default:
     {
-        SPDLOG_ERROR("Unimplement descriptor type: {:x}", static_cast<std::uint32_t>(hid_type));
+        ESP_LOGE(TAG, "Unimplement descriptor type: %x", static_cast<std::uint32_t>(hid_type));
         *p_status = static_cast<std::uint32_t>(UrbStatusType::StatusEPIPE);
         return {};
     }

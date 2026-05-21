@@ -1,6 +1,7 @@
 #include "ConcurrentTransferTracker.h"
 #include <usb/usb_host.h>
-#include <spdlog/spdlog.h>
+#include <esp_log.h>
+
 #include <esp_timer.h>
 
 namespace usbipdcpp
@@ -9,8 +10,8 @@ namespace usbipdcpp
     ConcurrentTransferTracker::ConcurrentTransferTracker()
         : segment_locks_(), segments_()
     {
-        SPDLOG_INFO("初始化并发转移追踪器，分段数: {}, 最大并发: {}",
-                    SEGMENT_COUNT, max_concurrent_);
+        ESP_LOGI("usbipdcpp_concurrenttransfertracker", "初始化并发转移追踪器，分段数: %d, 最大并发: %d",
+                 SEGMENT_COUNT, max_concurrent_);
     }
 
     bool ConcurrentTransferTracker::register_transfer(
@@ -21,7 +22,7 @@ namespace usbipdcpp
         size_t current_count = concurrent_transfer_count_.load(std::memory_order_acquire);
         if (current_count >= max_concurrent_)
         {
-            SPDLOG_WARN("并发转移数超过限制: {} >= {}", current_count, max_concurrent_);
+            ESP_LOGW("usbipdcpp_concurrenttransfertracker", "并发转移数超过限制: %d >= %d", current_count, max_concurrent_);
             return false;
         }
 
@@ -123,7 +124,7 @@ namespace usbipdcpp
         if (removed > 0)
         {
             concurrent_transfer_count_.fetch_sub(removed, std::memory_order_release);
-            SPDLOG_DEBUG("移除端点 {:02x} 的 {} 个转移", endpoint, removed);
+            ESP_LOGD("usbipdcpp_concurrenttransfertracker", "移除端点 %02x 的 %d 个转移", endpoint, removed);
         }
 
         return removed;
@@ -141,7 +142,7 @@ namespace usbipdcpp
         }
 
         concurrent_transfer_count_.store(0, std::memory_order_release);
-        SPDLOG_INFO("清空所有 {} 个转移", total_removed);
+        ESP_LOGI("usbipdcpp_concurrenttransfertracker", "清空所有 %d 个转移", total_removed);
     }
 
     std::vector<std::uint32_t> ConcurrentTransferTracker::get_timed_out_transfers(
@@ -164,7 +165,7 @@ namespace usbipdcpp
 
         if (!timed_out.empty())
         {
-            SPDLOG_WARN("检测到 {} 个超时的转移", timed_out.size());
+            ESP_LOGW("usbipdcpp_concurrenttransfertracker", "检测到 %d 个超时的转移", timed_out.size());
         }
 
         return timed_out;

@@ -1,7 +1,5 @@
 #include "tools.h"
 
-#include <spdlog/spdlog.h>
-
 using namespace usbipdcpp;
 
 UsbSpeed usbipdcpp::esp32_speed_to_usb_speed(int speed)
@@ -15,7 +13,7 @@ UsbSpeed usbipdcpp::esp32_speed_to_usb_speed(int speed)
     case USB_SPEED_HIGH:
         return UsbSpeed::High;
     default:
-        SPDLOG_DEBUG("unknown speed enum {}", speed);
+        ESP_LOGD("usbipdcpp_tools", "unknown speed enum %d", speed);
         return UsbSpeed::Unknown;
     }
 }

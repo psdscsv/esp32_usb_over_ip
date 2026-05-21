@@ -1,4 +1,6 @@
 #include "device.h"
+#include <esp_log.h>
+static const char *TAG = "usbipdcpp_device";
 
 #include <ranges>
 
@@ -70,7 +72,7 @@ std::optional<std::pair<usbipdcpp::UsbEndpoint, std::optional<usbipdcpp::UsbInte
 {
     if (ep == ep0_in.address)
     {
-        // SPDLOG_INFO("找到端口0{}", ep);
+        // ESP_LOGI(TAG, "找到端口0{}", ep);
         return std::make_pair(ep0_in, std::nullopt);
     }
     else if (ep == ep0_out.address)
@@ -103,7 +105,7 @@ void usbipdcpp::UsbDevice::handle_urb(
     const std::vector<UsbIpIsoPacketDescriptor> &iso_packet_descriptors,
     std::error_code &ec)
 {
-    SPDLOG_TRACE("设备处理URB，将其转发到对应handler中");
+    ESP_LOGV(TAG, "设备处理URB，将其转发到对应handler中");
     if (handler)
     {
         handler->dispatch_urb(cmd, seqnum, ep, interface, transfer_buffer_length, transfer_buffer_length,
@@ -111,45 +113,45 @@ void usbipdcpp::UsbDevice::handle_urb(
     }
     else
     {
-        SPDLOG_ERROR("设备没注册handler");
+        ESP_LOGE(TAG, "设备没注册handler");
     }
 }
 
 void UsbDevice::on_new_connection(Session &session, error_code &ec)
 {
-    SPDLOG_TRACE("设备处理 on_new_connection，将其转发到对应handler中");
+    ESP_LOGV(TAG, "设备处理 on_new_connection，将其转发到对应handler中");
     if (handler)
     {
         handler->on_new_connection(session, ec);
     }
     else
     {
-        SPDLOG_ERROR("设备没注册handler");
+        ESP_LOGE(TAG, "设备没注册handler");
     }
 }
 
 void usbipdcpp::UsbDevice::on_disconnection(error_code &ec)
 {
-    SPDLOG_TRACE("设备处理 on_disconnection，将其转发到对应handler中");
+    ESP_LOGV(TAG, "设备处理 on_disconnection，将其转发到对应handler中");
     if (handler)
     {
         handler->on_disconnection(ec);
     }
     else
     {
-        SPDLOG_ERROR("设备没注册handler");
+        ESP_LOGE(TAG, "设备没注册handler");
     }
 }
 
 void usbipdcpp::UsbDevice::handle_unlink_seqnum(std::uint32_t seqnum)
 {
-    SPDLOG_TRACE("设备处理unlink，将其转发到对应handler中");
+    ESP_LOGV(TAG, "设备处理unlink，将其转发到对应handler中");
     if (handler)
     {
         handler->handle_unlink_seqnum(seqnum);
     }
     else
     {
-        SPDLOG_ERROR("设备没注册handler");
+        ESP_LOGE(TAG, "设备没注册handler");
     }
 }

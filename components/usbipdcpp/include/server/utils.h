@@ -1,7 +1,7 @@
 #pragma once
 
 #include <exception>
-#include <spdlog/spdlog.h>
+#include <esp_log.h>
 
 namespace usbipdcpp
 {
@@ -16,11 +16,11 @@ namespace usbipdcpp
         }
         catch (const std::exception &ex)
         {
-            SPDLOG_ERROR("未处理的协程异常: {}", ex.what());
+            ESP_LOGE("usbipdcpp_utils", "未处理的协程异常: %s", ex.what());
         }
         catch (...)
         {
-            SPDLOG_ERROR("未处理的协程异常: unknown");
+            ESP_LOGE("usbipdcpp_utils", "未处理的协程异常: unknown");
         }
     }
 }

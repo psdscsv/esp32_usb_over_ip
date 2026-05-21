@@ -1,7 +1,7 @@
 #pragma once
 
 #include <memory>
-#include <spdlog/spdlog.h>
+#include <esp_log.h>
 #include <usb/usb_host.h> // 包含 usb_transfer_t 的定义
 
 struct UsbTransferDeleter

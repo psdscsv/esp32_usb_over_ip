@@ -1,4 +1,5 @@
 #include "Esp32Server.h"
+static const char *TAG = "esp32_uspipdcpp_server";
 
 #include <Session.h>
 #include <usb/usb_helpers.h>
@@ -38,13 +39,13 @@ void usbipdcpp::Esp32Server::client_event_callback(const usb_host_client_event_m
     auto this_server = static_cast<Esp32Server *>(arg);
     if (event_msg->event == USB_HOST_CLIENT_EVENT_NEW_DEV)
     {
-        spdlog::info("A new device detect in address {}", event_msg->new_dev.address);
+        ESP_LOGI(TAG, "A new device detect in address %u", event_msg->new_dev.address);
         usb_device_handle_t dev_handle;
         auto err = usb_host_device_open(this_server->host_client_handle, event_msg->new_dev.address, &dev_handle);
         if (err != ESP_OK)
         {
-            SPDLOG_ERROR("Failed to open USB device in address {}: {}", event_msg->new_dev.address,
-                         esp_err_to_name(err));
+            ESP_LOGE(TAG, "Failed to open USB device in address %u: %s", event_msg->new_dev.address,
+                     esp_err_to_name(err));
         }
         else
         {
@@ -55,38 +56,38 @@ void usbipdcpp::Esp32Server::client_event_callback(const usb_host_client_event_m
     }
     else
     {
-        spdlog::info("A device with handle {} has gone", static_cast<void *>(event_msg->dev_gone.dev_hdl));
+        ESP_LOGI(TAG, "A device with handle %p has gone", static_cast<void *>(event_msg->dev_gone.dev_hdl));
         this_server->remove_gone_device(event_msg->dev_gone.dev_hdl);
 
         const usb_config_desc_t *active_config_desc = nullptr;
         auto err = usb_host_get_active_config_descriptor(event_msg->dev_gone.dev_hdl, &active_config_desc);
         if (err == ESP_OK)
         {
-            spdlog::info("尝试释放{}的所有接口", static_cast<void *>(event_msg->dev_gone.dev_hdl));
+            ESP_LOGI(TAG, "尝试释放%p的所有接口", static_cast<void *>(event_msg->dev_gone.dev_hdl));
             for (int intf_i = 0; intf_i < active_config_desc->bNumInterfaces; intf_i++)
             {
                 err = usb_host_interface_release(this_server->host_client_handle, event_msg->dev_gone.dev_hdl, intf_i);
                 if (err != ESP_OK)
                 {
-                    SPDLOG_ERROR("释放设备接口时出错: {}", esp_err_to_name(err));
+                    ESP_LOGE(TAG, "释放设备接口时出错: %s", esp_err_to_name(err));
                 }
             }
 
             err = usb_host_device_close(this_server->host_client_handle, event_msg->dev_gone.dev_hdl);
             if (err != ESP_OK)
             {
-                SPDLOG_ERROR("Failed to close USB device handle {}: {}",
-                             static_cast<void *>(event_msg->dev_gone.dev_hdl),
-                             esp_err_to_name(err));
+                ESP_LOGE(TAG, "Failed to close USB device handle %p: %s",
+                         static_cast<void *>(event_msg->dev_gone.dev_hdl),
+                         esp_err_to_name(err));
             }
             else
             {
-                spdlog::info("成功关闭device句柄{}", static_cast<void *>(event_msg->dev_gone.dev_hdl));
+                ESP_LOGI(TAG, "成功关闭device句柄%p", static_cast<void *>(event_msg->dev_gone.dev_hdl));
             }
         }
         else
         {
-            SPDLOG_ERROR("无法获取设备活动配置描述符：{}", esp_err_to_name(err));
+            ESP_LOGE(TAG, "无法获取设备活动配置描述符：%s", esp_err_to_name(err));
         }
     }
 }
@@ -97,7 +98,7 @@ void usbipdcpp::Esp32Server::bind_host_device(usb_device_handle_t dev)
     auto err = usb_host_device_info(dev, &dev_info);
     if (err != ESP_OK)
     {
-        spdlog::warn("无法获取设备信息，忽略这个设备：{}", esp_err_to_name(err));
+        ESP_LOGW(TAG, "无法获取设备信息，忽略这个设备：%s", esp_err_to_name(err));
         return;
     }
 
@@ -105,7 +106,7 @@ void usbipdcpp::Esp32Server::bind_host_device(usb_device_handle_t dev)
     err = usb_host_get_device_descriptor(dev, &device_descriptor);
     if (err != ESP_OK)
     {
-        spdlog::warn("无法获取设备描述符，忽略这个设备：{}", esp_err_to_name(err));
+        ESP_LOGW(TAG, "无法获取设备描述符，忽略这个设备：%s", esp_err_to_name(err));
         return;
     }
 
@@ -113,11 +114,11 @@ void usbipdcpp::Esp32Server::bind_host_device(usb_device_handle_t dev)
     err = usb_host_get_active_config_descriptor(dev, &active_config_desc);
     if (err)
     {
-        spdlog::warn("无法获取设备当前的配置描述符，忽略这个设备：{}", esp_err_to_name(err));
+        ESP_LOGW(TAG, "无法获取设备当前的配置描述符，忽略这个设备：%s", esp_err_to_name(err));
         return;
     }
 
-    SPDLOG_DEBUG("该设备有{}个interface", active_config_desc->bNumInterfaces);
+    ESP_LOGD(TAG, "该设备有%u个interface", active_config_desc->bNumInterfaces);
     std::vector<UsbInterface> interfaces;
 
     // 预分配内存避免频繁重新分配
@@ -127,20 +128,20 @@ void usbipdcpp::Esp32Server::bind_host_device(usb_device_handle_t dev)
     }
     catch (const std::bad_alloc &e)
     {
-        SPDLOG_ERROR("无法为interfaces预分配内存: {}", e.what());
+        ESP_LOGE(TAG, "无法为interfaces预分配内存: %s", e.what());
         return;
     }
 
     for (auto intf_i = 0; intf_i < active_config_desc->bNumInterfaces; intf_i++)
     {
         [[maybe_unused]] auto alter_setting_num = usb_parse_interface_number_of_alternate(active_config_desc, intf_i);
-        SPDLOG_DEBUG("第{}个interface有{}个altsetting", intf_i, alter_setting_num);
+        ESP_LOGD(TAG, "第%d个interface有%u个altsetting", intf_i, alter_setting_num);
 
         int intf_offset;
         auto intf_desc = usb_parse_interface_descriptor(active_config_desc, intf_i, 0, &intf_offset);
         if (!intf_desc)
         {
-            SPDLOG_ERROR("无法解析接口{}的描述符", intf_i);
+            ESP_LOGE(TAG, "无法解析接口%d的描述符", intf_i);
             continue;
         }
 
@@ -148,7 +149,7 @@ void usbipdcpp::Esp32Server::bind_host_device(usb_device_handle_t dev)
         err = usb_host_interface_claim(host_client_handle, dev, intf_i, 0);
         if (err != ESP_OK)
         {
-            SPDLOG_ERROR("无法声明接口{}：{}", intf_i, esp_err_to_name(err));
+            ESP_LOGE(TAG, "无法声明接口%d：%s", intf_i, esp_err_to_name(err));
             // 释放之前已经声明的接口
             for (int j = 0; j < intf_i; j++)
             {
@@ -164,7 +165,7 @@ void usbipdcpp::Esp32Server::bind_host_device(usb_device_handle_t dev)
         }
         catch (const std::bad_alloc &e)
         {
-            SPDLOG_ERROR("无法为endpoints预分配内存: {}", e.what());
+            ESP_LOGE(TAG, "无法为endpoints预分配内存: %s", e.what());
             usb_host_interface_release(host_client_handle, dev, intf_i);
             for (int j = 0; j < intf_i; j++)
             {
@@ -180,7 +181,7 @@ void usbipdcpp::Esp32Server::bind_host_device(usb_device_handle_t dev)
                                                                   &endpoint_offset);
             if (!ep_desc)
             {
-                SPDLOG_ERROR("无法解析端点{}的描述符", ep_i);
+                ESP_LOGE(TAG, "无法解析端点%d的描述符", ep_i);
                 continue;
             }
 
@@ -203,7 +204,7 @@ void usbipdcpp::Esp32Server::bind_host_device(usb_device_handle_t dev)
         }
         catch (const std::bad_alloc &e)
         {
-            SPDLOG_ERROR("无法创建UsbInterface: {}", e.what());
+            ESP_LOGE(TAG, "无法创建UsbInterface: %s", e.what());
             usb_host_interface_release(host_client_handle, dev, intf_i);
             for (int j = 0; j < intf_i; j++)
             {
@@ -239,7 +240,7 @@ void usbipdcpp::Esp32Server::bind_host_device(usb_device_handle_t dev)
     }
     catch (const std::bad_alloc &e)
     {
-        SPDLOG_ERROR("无法创建UsbDevice: {}", e.what());
+        ESP_LOGE(TAG, "无法创建UsbDevice: %s", e.what());
         // 释放所有接口
         for (int intf_i = 0; intf_i < active_config_desc->bNumInterfaces; intf_i++)
         {
@@ -254,7 +255,7 @@ void usbipdcpp::Esp32Server::unbind_host_device(usb_device_handle_t dev)
     auto err = usb_host_device_info(dev, &dev_info);
     if (err != ESP_OK)
     {
-        spdlog::error("无法获取设备信息：{}", esp_err_to_name(err));
+        ESP_LOGE(TAG, "无法获取设备信息：%s", esp_err_to_name(err));
         return;
     }
     auto taregt_busid = esp32_get_device_busid(dev_info.dev_addr);
@@ -272,7 +273,7 @@ void usbipdcpp::Esp32Server::unbind_host_device(usb_device_handle_t dev)
                     err = usb_host_get_active_config_descriptor(dev, &active_config_desc);
                     if (err != ESP_OK)
                     {
-                        SPDLOG_ERROR("无法获取设备活动配置描述符：{}", esp_err_to_name(err));
+                        ESP_LOGE(TAG, "无法获取设备活动配置描述符：%s", esp_err_to_name(err));
                         return;
                     }
                     for (int intf_i = 0; intf_i < active_config_desc->bNumInterfaces; intf_i++)
@@ -280,20 +281,20 @@ void usbipdcpp::Esp32Server::unbind_host_device(usb_device_handle_t dev)
                         err = usb_host_interface_release(host_client_handle, dev, intf_i);
                         if (err != ESP_OK)
                         {
-                            SPDLOG_ERROR("释放设备接口时出错: {}", esp_err_to_name(err));
+                            ESP_LOGE(TAG, "释放设备接口时出错: %s", esp_err_to_name(err));
                         }
                     }
                 }
                 available_devices.erase(i);
-                spdlog::info("成功取消绑定");
+                ESP_LOGI(TAG, "成功取消绑定");
                 return;
             }
         }
-        SPDLOG_WARN("可使用的设备中无目标设备");
+        ESP_LOGW(TAG, "可使用的设备中无目标设备");
 
         if (using_devices.contains(taregt_busid))
         {
-            SPDLOG_WARN("正在使用的设备不支持解绑");
+            ESP_LOGW(TAG, "正在使用的设备不支持解绑");
         }
     }
 }
@@ -308,7 +309,7 @@ void usbipdcpp::Esp32Server::start(asio::ip::tcp::endpoint &ep)
     client_event_thread = std::thread([this]()
                                       {
         try {
-            SPDLOG_INFO("启动一个client event handle的事件循环线程");
+            ESP_LOGI(TAG, "启动一个client event handle的事件循环线程");
             ESP_LOGI(TAG, "client_event_thread 启动，当前堆内存: %d", esp_get_free_heap_size());
             
             while (!should_exit_client_event_thread) {
@@ -329,7 +330,7 @@ void usbipdcpp::Esp32Server::start(asio::ip::tcp::endpoint &ep)
                     break;
                 }
             }
-            SPDLOG_TRACE("退出client event事件循环");
+            ESP_LOGV(TAG, "退出client event事件循环");
         } catch (const std::bad_alloc& e) {
             ESP_LOGE(TAG, "内存分配失败: %s, 当前堆内存: %d", e.what(), esp_get_free_heap_size());
             // 不要退出，记录错误并继续
@@ -371,7 +372,7 @@ void usbipdcpp::Esp32Server::start(asio::ip::tcp::endpoint &ep)
             }
         } catch (const std::exception &e) {
             ESP_LOGE(TAG, "client_event_thread发生异常: %s", e.what());
-            SPDLOG_ERROR("An unexpected exception occurs in client event handle thread: {}", e.what());
+            ESP_LOGE(TAG, "An unexpected exception occurs in client event handle thread: %s", e.what());
         } });
     esp_pthread_cfg_t default_cfg = esp_pthread_get_default_config();
     esp_pthread_set_cfg(&default_cfg);
@@ -393,7 +394,7 @@ void usbipdcpp::Esp32Server::stop()
                 auto err = usb_host_get_active_config_descriptor(device, &active_config_desc);
                 if (err != ESP_OK)
                 {
-                    SPDLOG_ERROR("无法获取活动配置描述符：{}", esp_err_to_name(err));
+                    ESP_LOGE(TAG, "无法获取活动配置描述符：%s", esp_err_to_name(err));
                     continue;
                 }
                 for (int intf_i = 0; intf_i < active_config_desc->bNumInterfaces; intf_i++)
@@ -401,7 +402,7 @@ void usbipdcpp::Esp32Server::stop()
                     err = usb_host_interface_release(host_client_handle, device, intf_i);
                     if (err)
                     {
-                        SPDLOG_ERROR("释放设备接口{}时出错: {}", intf_i, esp_err_to_name(err));
+                        ESP_LOGE(TAG, "释放设备接口%d时出错: %s", intf_i, esp_err_to_name(err));
                     }
                 }
             }
@@ -416,7 +417,7 @@ void usbipdcpp::Esp32Server::stop()
                 auto err = usb_host_get_active_config_descriptor(device, &active_config_desc);
                 if (err != ESP_OK)
                 {
-                    SPDLOG_ERROR("无法获取活动配置描述符：{}", esp_err_to_name(err));
+                    ESP_LOGE(TAG, "无法获取活动配置描述符：%s", esp_err_to_name(err));
                     continue;
                 }
                 for (int intf_i = 0; intf_i < active_config_desc->bNumInterfaces; intf_i++)
@@ -424,7 +425,7 @@ void usbipdcpp::Esp32Server::stop()
                     err = usb_host_interface_release(host_client_handle, device, intf_i);
                     if (err)
                     {
-                        SPDLOG_ERROR("释放设备接口{}时出错: {}", intf_i, esp_err_to_name(err));
+                        ESP_LOGE(TAG, "释放设备接口%d时出错: %s", intf_i, esp_err_to_name(err));
                     }
                 }
             }
@@ -433,9 +434,9 @@ void usbipdcpp::Esp32Server::stop()
 
     should_exit_client_event_thread = true;
     usb_host_client_unblock(host_client_handle);
-    spdlog::info("等待client handle事件线程结束");
+    ESP_LOGI(TAG, "等待client handle事件线程结束");
     client_event_thread.join();
-    spdlog::info("client handle事件线程结束");
+    ESP_LOGI(TAG, "client handle事件线程结束");
 }
 
 usbipdcpp::Esp32Server::~Esp32Server()
@@ -480,7 +481,7 @@ void usbipdcpp::Esp32Server::remove_gone_device(usb_device_handle_t dev)
     {
         auto address = find_ret->first;
         host_devices.erase(find_ret);
-        SPDLOG_TRACE("成功从所有设备中移除拔除的设备");
+        ESP_LOGV(TAG, "成功从所有设备中移除拔除的设备");
         auto target_busid = esp32_get_device_busid(address);
 
         std::lock_guard lock2(devices_mutex);
@@ -491,11 +492,11 @@ void usbipdcpp::Esp32Server::remove_gone_device(usb_device_handle_t dev)
                 if_is_esp32_then_mark_removed((*i)->handler);
                 // 此处可以删除设备，因为此时因其还处于可用设备，因此没有session正在处理这个设备
                 available_devices.erase(i);
-                spdlog::info("从可用设备中移除目标设备");
+                ESP_LOGI(TAG, "从可用设备中移除目标设备");
                 return;
             }
         }
-        SPDLOG_WARN("可使用的设备中无目标设备");
+        ESP_LOGW(TAG, "可使用的设备中无目标设备");
         for (auto i = using_devices.begin(); i != using_devices.end(); ++i)
         {
             if (i->first == target_busid)
@@ -503,7 +504,7 @@ void usbipdcpp::Esp32Server::remove_gone_device(usb_device_handle_t dev)
                 if_is_esp32_then_mark_removed(i->second->handler);
                 // 此处不能删除设备，因为此时session还未关闭，若删除设备会导致野指针
                 // 标记已移除后若再收到一个URB会返回一个err，从而自然导致session关闭
-                SPDLOG_WARN("标记正在使用的设备为已移除");
+                ESP_LOGW(TAG, "标记正在使用的设备为已移除");
                 return;
             }
         }

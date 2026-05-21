@@ -1,6 +1,7 @@
 #pragma once
 
 #include "InterfaceHandler.h"
+#include <atomic>
 
 namespace usbipdcpp
 {

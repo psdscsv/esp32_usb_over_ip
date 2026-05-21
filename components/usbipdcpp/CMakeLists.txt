@@ -25,7 +25,6 @@ idf_component_register(SRCS ${COMPONENT_SRCS}
     REQUIRES
         sock_utils
         asio
-        spdlog
         usb
         esp_timer
         pthread

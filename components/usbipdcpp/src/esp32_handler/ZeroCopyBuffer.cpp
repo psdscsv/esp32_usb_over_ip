@@ -1,6 +1,6 @@
 #include "ZeroCopyBuffer.h"
-#include <spdlog/spdlog.h>
-
+#include <esp_log.h>
+static const char *TAG = "usbipdcpp_zerocopybuffer";
 namespace usbipdcpp
 {
 
@@ -67,7 +67,7 @@ namespace usbipdcpp
                 }
                 catch (...)
                 {
-                    SPDLOG_ERROR("Fragment cleanup exception caught");
+                    ESP_LOGE(TAG, "Fragment cleanup exception caught");
                 }
             }
         }
@@ -105,8 +105,8 @@ namespace usbipdcpp
         fragment_status_.resize(num_fragments, false);
         fragment_data_.resize(num_fragments, {nullptr, 0});
 
-        SPDLOG_DEBUG("创建分片传输上下文: seq={}, 总大小={}, 分片数={}",
-                     seqnum, total_size, num_fragments);
+        ESP_LOGD(TAG, "创建分片传输上下文: seq=%d, 总大小=%d, 分片数=%d",
+                 seqnum, total_size, num_fragments);
     }
 
     void FragmentedTransferContext::mark_fragment_done(size_t fragment_idx, bool success)
@@ -115,7 +115,7 @@ namespace usbipdcpp
 
         if (fragment_idx >= fragment_status_.size())
         {
-            SPDLOG_WARN("无效的分片索引: {} >= {}", fragment_idx, fragment_status_.size());
+            ESP_LOGW(TAG, "无效的分片索引: %d >= %d", fragment_idx, fragment_status_.size());
             return;
         }
 
@@ -126,7 +126,7 @@ namespace usbipdcpp
 
             if (!success)
             {
-                SPDLOG_WARN("分片 {} 传输失败", fragment_idx);
+                ESP_LOGW(TAG, "分片 %d 传输失败", fragment_idx);
             }
         }
 
@@ -145,7 +145,7 @@ namespace usbipdcpp
             }
             catch (...)
             {
-                SPDLOG_ERROR("完成回调异常");
+                ESP_LOGE(TAG, "完成回调异常");
             }
         }
     }
@@ -162,7 +162,7 @@ namespace usbipdcpp
 
         if (idx >= fragment_data_.size())
         {
-            SPDLOG_WARN("无效的分片索引进行注册: {} >= {}", idx, fragment_data_.size());
+            ESP_LOGW(TAG, "无效的分片索引进行注册: %d >= %d", idx, fragment_data_.size());
             return;
         }
 

@@ -1,3 +1,4 @@
+#include <esp_log.h>
 #pragma once
 
 #include "protocol.h"
@@ -46,7 +47,7 @@ namespace usbipdcpp
          */
         virtual std::uint8_t request_get_protocol(std::uint32_t *p_status)
         {
-            SPDLOG_WARN("unhandled request_get_protocol");
+            ESP_LOGW("usbipdcpp_HidVirtualInterfaceHandler", "unhandled request_get_protocol");
             *p_status = static_cast<std::uint32_t>(UrbStatusType::StatusEPIPE);
             return 0;
         };
@@ -58,7 +59,7 @@ namespace usbipdcpp
          */
         virtual void request_set_protocol(std::uint16_t type, std::uint32_t *p_status)
         {
-            SPDLOG_WARN("unhandled request_set_protocol");
+            ESP_LOGW("usbipdcpp_HidVirtualInterfaceHandler", "unhandled request_set_protocol");
             *p_status = static_cast<std::uint32_t>(UrbStatusType::StatusEPIPE);
         };
 

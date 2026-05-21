@@ -3,8 +3,10 @@
 #include <filesystem>
 #include <asio.hpp>
 #include <variant>
-#include <spdlog/spdlog.h>
+#include <esp_log.h>
 #include "usb_transfer_ptr.h"
+
+static const char *TAG = "usbipdcpp_protocol";
 using namespace usbipdcpp;
 
 const char *usbipdcpp::TransferErrorCategory::name() const noexcept
@@ -275,8 +277,7 @@ asio::awaitable<void> UsbIpResponse::UsbIpRetSubmit::to_socket_co(asio::ip::tcp:
 
     if (usb_transfer)
     {
-        SPDLOG_TRACE("零拷贝发送: seq={}, 数据长度={}, 偏移={}",
-                     header.seqnum, actual_length, data_offset);
+        ESP_LOGD(TAG, "零拷贝发送: seq=%d, 数据长度=%d, 偏移=%d", header.seqnum, actual_length, data_offset);
 
         std::array<asio::const_buffer, 2> buffers;
         buffers[0] = asio::buffer(header_data);
@@ -822,7 +823,7 @@ asio::awaitable<usbipdcpp::UsbIpCommand::OpCmdVariant> usbipdcpp::UsbIpCommand::
             co_return OpCmdVariant{};
         }
         auto op = co_await read_u16_co(sock);
-        SPDLOG_DEBUG("收到op: 0x{:04x}", op);
+        ESP_LOGD(TAG, "收到op: %x", op);
 
         switch (op)
         {
@@ -847,7 +848,7 @@ asio::awaitable<usbipdcpp::UsbIpCommand::OpCmdVariant> usbipdcpp::UsbIpCommand::
     }
     catch (const asio::system_error &e)
     {
-        SPDLOG_DEBUG("asio错误：{}", e.what());
+        ESP_LOGD(TAG, "asio错误：%s", e.what());
         if (e.code() == asio::error::eof)
         {
             ec = make_error_code(ErrorType::SOCKET_EOF);
@@ -866,7 +867,7 @@ asio::awaitable<usbipdcpp::UsbIpCommand::CmdVariant> usbipdcpp::UsbIpCommand::ge
     try
     {
         auto command = co_await read_u32_co(sock);
-        SPDLOG_DEBUG("收到command: 0x{:04x}", command);
+        ESP_LOGD(TAG, "收到command: 0x%04x", command);
 
         switch (command)
         {
@@ -891,7 +892,7 @@ asio::awaitable<usbipdcpp::UsbIpCommand::CmdVariant> usbipdcpp::UsbIpCommand::ge
     }
     catch (const asio::system_error &e)
     {
-        SPDLOG_DEBUG("asio错误：{}", e.what());
+        ESP_LOGD(TAG, "asio错误：%s", e.what());
         if (e.code() == asio::error::eof)
         {
             ec = make_error_code(ErrorType::SOCKET_EOF);

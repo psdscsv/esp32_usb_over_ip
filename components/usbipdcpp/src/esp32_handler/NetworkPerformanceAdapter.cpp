@@ -1,5 +1,5 @@
 #include "NetworkPerformanceAdapter.h"
-#include <spdlog/spdlog.h>
+#include <esp_log.h>
 #include <algorithm>
 #include <numeric>
 

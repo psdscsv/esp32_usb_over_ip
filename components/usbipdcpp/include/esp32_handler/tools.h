@@ -5,10 +5,9 @@
 #include <string>
 #include <format>
 
-#include <spdlog/spdlog.h>
 #include <constant.h>
 
-
+#include <esp_log.h>
 namespace usbipdcpp
 {
     inline std::string esp32_get_device_busid(std::uint8_t address)
