@@ -17,7 +17,7 @@ static const char *TAG = "Esp32DeviceHandler";
 const char *usbipdcpp::Esp32DeviceHandler::TAG = "Esp32DeviceHandler";
 
 usbipdcpp::Esp32DeviceHandler::Esp32DeviceHandler(UsbDevice &handle_device, usb_device_handle_t native_handle,
-                                                  usb_host_client_handle_t host_client_handle) : DeviceHandlerBase(handle_device), native_handle(native_handle), host_client_handle(host_client_handle)
+                                                  usb_host_client_handle_t host_client_handle) : AbstDeviceHandler(handle_device), native_handle(native_handle), host_client_handle(host_client_handle)
 {
     ESP_ERROR_CHECK(usb_host_device_info(native_handle, &device_info));
 }

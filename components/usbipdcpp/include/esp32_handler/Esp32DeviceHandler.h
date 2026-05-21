@@ -17,7 +17,7 @@
 
 namespace usbipdcpp
 {
-    class Esp32DeviceHandler : public DeviceHandlerBase
+    class Esp32DeviceHandler : public AbstDeviceHandler
     {
         friend class Esp32Server;
 

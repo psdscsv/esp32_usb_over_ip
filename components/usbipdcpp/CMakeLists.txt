@@ -12,6 +12,13 @@ file(GLOB_RECURSE COMPONENT_SRCS
     "src/server/*.cpp"
 )
 
+# Exclude virtual-device implementation files from build (virtual device support removed)
+list(REMOVE_ITEM COMPONENT_SRCS
+    "${CMAKE_CURRENT_LIST_DIR}/src/DeviceHandler/VirtualDeviceHandler.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/InterfaceHandler/VirtualInterfaceHandler.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/InterfaceHandler/HidVirtualInterfaceHandler.cpp"
+)
+
 # 设置包含目录
 set(COMPONENT_ADD_INCLUDEDIRS 
     "include/DeviceHandler"

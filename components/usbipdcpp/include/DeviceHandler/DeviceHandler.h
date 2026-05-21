@@ -106,11 +106,6 @@ namespace usbipdcpp
         std::mutex self_mutex;
     };
 
-    class DeviceHandlerBase : public AbstDeviceHandler
-    {
-    public:
-        explicit DeviceHandlerBase(UsbDevice &handle_device) : AbstDeviceHandler(handle_device)
-        {
-        }
-    };
+    // DeviceHandlerBase was an empty thin wrapper around AbstDeviceHandler and
+    // has been removed. Subclasses should inherit from AbstDeviceHandler directly.
 }
