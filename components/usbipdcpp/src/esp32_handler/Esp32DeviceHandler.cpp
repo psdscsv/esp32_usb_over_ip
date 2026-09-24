@@ -887,6 +887,15 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
             data_len = trx->actual_num_bytes - static_cast<int>(data_offset);
             if (data_len < 0)
                 data_len = 0;
+
+            // 【关键修复】限制 data_len 不能超过原始请求长度
+            if (static_cast<size_t>(data_len) > callback_arg.original_transfer_buffer_length)
+            {
+                ESP_LOGW(TAG, "data_len %d > orig %u, truncating (seq=%u, type=%d)",
+                         data_len, callback_arg.original_transfer_buffer_length,
+                         callback_arg.seqnum, callback_arg.transfer_type);
+                data_len = callback_arg.original_transfer_buffer_length;
+            }
         }
         else
         {
@@ -894,11 +903,16 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
             data_len = trx->actual_num_bytes;
         }
 
-        const bool has_data = (!callback_arg.is_out && data_len > 0); // 只有 IN 且有数据才发送负载
+        const bool has_data = (!callback_arg.is_out && data_len > 0);
 
         if (has_data)
         {
             // IN 有数据：使用零拷贝发送
+            ESP_LOGI(TAG, "IN DATA: seq=%u, type=%d, out=%d, actual=%d, offset=%zu, data_len=%d, orig=%u",
+                     callback_arg.seqnum, callback_arg.transfer_type, callback_arg.is_out,
+                     trx->actual_num_bytes, data_offset, data_len,
+                     callback_arg.original_transfer_buffer_length);
+
             auto response = UsbIpResponse::UsbIpRetSubmit::create_ret_submit(
                 callback_arg.seqnum,
                 trxstat2error(trx->status),
@@ -925,6 +939,12 @@ void usbipdcpp::Esp32DeviceHandler::transfer_callback(usb_transfer_t *trx)
             response.usb_transfer = nullptr;
             response.iso_packet_descriptor = {};
             callback_arg.handler.session.load()->submit_ret_submit(std::move(response));
+
+            ESP_LOGI(TAG, "CB: seq=%u, type=%d, out=%d, actual=%d, offset=%zu, len=%d, orig=%u",
+                     callback_arg.seqnum, callback_arg.transfer_type, callback_arg.is_out,
+                     trx->actual_num_bytes, data_offset, data_len,
+                     callback_arg.original_transfer_buffer_length);
+
             usb_host_transfer_free(trx);
         }
     }
